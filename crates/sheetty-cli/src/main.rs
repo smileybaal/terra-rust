@@ -17,6 +17,7 @@ commands:
   report unimplemented [--spec A] [--impl B] [--rank blast-radius] [--json]
   view <SHEET> [--cols a,b,c] [--out FILE] [--sheets DIR]
   schema [--sheets DIR] [--json] [--emit PATH]
+  rules   print which MDD preflight checks this engine implements
 "
 }
 
@@ -32,6 +33,10 @@ fn main() -> ExitCode {
         "report" => cmd_report(&args[1..]),
         "view" => cmd_view(&args[1..]),
         "schema" => cmd_schema(&args[1..]),
+        "rules" => {
+            print!("{}", rules_report());
+            ExitCode::SUCCESS
+        }
         "-h" | "--help" | "help" => {
             print!("{}", usage());
             ExitCode::SUCCESS

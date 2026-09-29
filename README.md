@@ -82,25 +82,42 @@ emits the whole 125 MB assembly regardless of `-t`).
 |---|---|
 | target | `Terraria.exe`, PE32 i386, .NET CLI assembly, sha256 `960a03bf...` |
 | sheets | 17 |
-| rows | 120,677 |
-| columns | 146 |
+| rows | 142,357 |
+| columns | 147 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
-| native evidence | 18,300 functions, 68,268 PE types, 21,159 strings (Ghidra 12.1.4) |
-| managed evidence | 1,549 types, 14,052 methods, 28,039 fields (ILSpy 9.1.0) |
+| preflight rule coverage | **19 of 30** MDD checks exist (13 implemented, 5 partial, 1 unexercised, 11 absent) |
+| managed evidence (ILSpy) | 1,549 types, 14,052 methods, 28,039 fields, 715 base/interface links |
+| managed dependency edges | 2,212 (1,545 `uses`, 667 `inherits`), derived from C# declarations |
+| strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk |
+| Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 
-## What Ghidra can and cannot do here
+## What Ghidra actually produced here (read this before trusting the sheets)
 
-`Terraria.exe` is managed .NET. Ghidra has no CIL decompiler, and `ghidra-cli`
-says so itself:
+`Terraria.exe` is managed .NET. Two separate limits follow, and both are
+measured rather than assumed:
 
-> This appears to be .NET managed code. Ghidra cannot decompile .NET IL bytecode.
-> Consider using a .NET decompiler (e.g., ilspy-cli) for better results.
+1. **Ghidra has no CIL decompiler.** `ghidra-cli` refuses the task itself:
 
-The split is deliberate and recorded (`dec003`, `dec012`): Ghidra produces PE,
-import, resource, string and CLI-metadata-structure evidence; **ILSpy produces
-the readable game logic**. Ghidra's auto-analysis still recovers real managed
-method names on 18,300 functions, which is useful provenance even where the
-decompiler output is not readable.
+   > This appears to be .NET managed code. Ghidra cannot decompile .NET IL bytecode.
+   > Consider using a .NET decompiler (e.g., ilspy-cli) for better results.
+
+2. **Ghidra decoded zero instructions.** `ghidra stats` reports
+   `instructions: 0`; `ghidra disasm 0x00402051` fails with *"No instruction at
+   address ... may be data or unanalyzed code"*; `ghidra graph calls` returns
+   `edge_count: 0` over 18,299 nodes. The 18,300 "functions" are names and
+   addresses read out of the .NET metadata, **not analyzed code**.
+
+Consequences, all recorded in `sheets/decisions.tsv`:
+
+| | |
+|---|---|
+| `re/functions.tsv` | relabelled `status: symbol_only`; `size` is a metadata record length, not code size (dec013) |
+| `re/triage.tsv` | **not** scored from Ghidra size, because that would be scoring nothing. Scored from ILSpy-measured fields and methods per type, which tops out at `Terraria.Player` (1316 fields, 865 methods), `Main`, `WorldGen` - which are Terraria's largest classes (dec013) |
+| `re/callgraph.tsv` | Ghidra contributed no edges. Edges are derived from the decompiled C# declarations instead (dec013) |
+| Ghidra program state | `find string ""` mutated it (strings 21159 to 29). Prefer explicit patterns; re-import before trusting state (dec014) |
+
+Ghidra is still the right tool for what it *can* do here: PE structure, imports,
+the 21,081-string table, and 68,268 data types recovered from CLI metadata.
 
 ## Legal (MDD §8.10)
 

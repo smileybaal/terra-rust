@@ -1001,6 +1001,15 @@ pub fn human_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]
     let s = summarize(sheets, findings);
     let _ = writeln!(out, "PREFLIGHT  sheets/  {} sheets, {} rows, {} columns", s.sheets, s.rows, s.columns);
     let _ = writeln!(out, "  emitter {EMITTER_VERSION}");
+    let (ri, rp, ru, ra) = rules_summary();
+    let total = RULES.len();
+    let _ = writeln!(
+        out,
+        "  rule coverage  {}/{} MDD checks exist (implemented {ri}, partial {rp}, unexercised {ru}, absent {ra})",
+        ri + rp + ru,
+        total
+    );
+    let _ = writeln!(out, "  (run `sheetty rules` for the per-check status; an absent rule is not a passing one)");
     let _ = writeln!(out);
 
     for layer in ["L0", "L1", "L2", "L3"] {
@@ -1072,7 +1081,12 @@ pub fn human_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]
 pub fn json_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]) -> String {
     let s = summarize(sheets, findings);
     let mut out = String::new();
-    let _ = write!(out, "{{\"emitter\":\"{EMITTER_VERSION}\",\"sheets\":{},\"rows\":{},\"columns\":{},\"errors\":{},\"warnings\":{},\"findings\":[", s.sheets, s.rows, s.columns, s.errors, s.warnings);
+    let (ri, rp, ru, ra) = rules_summary();
+    let _ = write!(
+        out,
+        "{{\"emitter\":\"{EMITTER_VERSION}\",\"sheets\":{},\"rows\":{},\"columns\":{},\"errors\":{},\"warnings\":{},\"rule_coverage\":{{\"implemented\":{ri},\"partial\":{rp},\"unexercised\":{ru},\"absent\":{ra}}},\"findings\":[",
+        s.sheets, s.rows, s.columns, s.errors, s.warnings
+    );
     for (i, f) in findings.iter().enumerate() {
         if i > 0 {
             out.push(',');
@@ -1133,4 +1147,92 @@ pub fn run_layers(layer: &str) -> (bool, bool, bool, bool) {
         "L3" => (true, true, true, true),
         _ => (true, true, true, true),
     }
+}
+
+// ---------------------------------------------------------------------------
+// rule coverage self-audit
+// ---------------------------------------------------------------------------
+//
+// The MDD's own instrumentation rule: "never hand-maintain a number that can be
+// derived. A hand-maintained metric is a metric that lies." The most dangerous
+// lie this engine could tell is "preflight passed", when in fact only a subset
+// of the method's checks exist. So the set of checks is enumerated here as data,
+// with an honest status for each, and the preflight report states its own
+// coverage. A rule that does not exist must never be implied by silence.
+//
+// status values:
+//   implemented  the rule runs and has been seen to fire
+//   partial      the rule runs but covers less than the MDD requires
+//   unexercised  the rule runs but has never had anything to check
+//   absent       the rule does not exist in this engine
+
+pub struct RuleCheck {
+    pub n: &'static str,
+    pub name: &'static str,
+    pub status: &'static str,
+    pub emits: &'static str,
+    pub note: &'static str,
+}
+
+pub const RULES: &[RuleCheck] = &[
+    RuleCheck { n: "1", name: "UTF-8, no BOM",         status: "implemented", emits: "E-L0-BOM",       note: "" },
+    RuleCheck { n: "2", name: "LF line endings only",  status: "implemented", emits: "E-L0-EOL",       note: "git core.autocrlf must stay input or this fires on every row" },
+    RuleCheck { n: "3", name: "TAB delimited",         status: "implemented", emits: "E-L0-DELIM",     note: "" },
+    RuleCheck { n: "4", name: "Manifest parses",       status: "implemented", emits: "E-L0-MANIFEST",  note: "" },
+    RuleCheck { n: "5", name: "Header matches schema", status: "implemented", emits: "E-SCHEMA-DRIFT", note: "compares name and type only" },
+    RuleCheck { n: "6", name: "Key present, unique",   status: "implemented", emits: "E-L0-KEY,E-L0-DUPKEY", note: "" },
+    RuleCheck { n: "7", name: "id charset",            status: "implemented", emits: "E-L0-CHARSET",   note: "relaxed to allow '.' when a sheet declares id_form: compound (dec009)" },
+    RuleCheck { n: "8", name: "Every cell type-checks", status: "implemented", emits: "E-L1-VALUE",    note: "" },
+    RuleCheck { n: "9", name: "Units match schema",    status: "absent",      emits: "",               note: "unit is parsed but never compared against 01-schema.tsv" },
+    RuleCheck { n: "10", name: "Enum domain",          status: "partial",     emits: "E-L1-VALUE",    note: "checks identifier form only; the declared variant set is not consulted" },
+    RuleCheck { n: "11", name: "Empty/NULL, defaults", status: "partial",     emits: "E-L1-EMPTY",    note: "empty-in-required and NULL are handled; schema defaults are never applied" },
+    RuleCheck { n: "12", name: "Every FK resolves",    status: "implemented", emits: "E-L2-REF",       note: "" },
+    RuleCheck { n: "13", name: "No duplicate rows across sheets", status: "absent", emits: "",          note: "MDD severity W; not implemented" },
+    RuleCheck { n: "14", name: "No cycles",            status: "implemented", emits: "E-L2-CYCLE",     note: "DFS over manifest requires plus column refs" },
+    RuleCheck { n: "15", name: "Topological order exists", status: "absent",  emits: "",               note: "cycle detection only; no Kahn ordering" },
+    RuleCheck { n: "16", name: "No unimplemented rows", status: "partial",    emits: "L3 overlap",     note: "reported, not gating; --strict gates warnings only" },
+    RuleCheck { n: "17", name: "No orphan rows",       status: "partial",     emits: "L3 overlap",     note: "reported, never fails" },
+    RuleCheck { n: "18", name: "No divergent rows",    status: "implemented", emits: "L3 overlap",     note: "attribute compare over shared columns" },
+    RuleCheck { n: "19", name: "Every asset exists",   status: "partial",     emits: "re/assets status=found|missing", note: "done by the synthesizer at extraction time, not by sheetty" },
+    RuleCheck { n: "20", name: "Asset hash matches baseline", status: "absent", emits: "",              note: "sizes are recorded; hashes are not computed" },
+    RuleCheck { n: "21", name: "Kernel allowlist complete", status: "unexercised", emits: "E-L0-KERNEL", note: "implemented both ways; kernel/ is empty so it has never had anything to check" },
+    RuleCheck { n: "22", name: "No generated file in tree", status: "absent",  emits: "",               note: "no emitter exists, so there is no banner to grep for" },
+    RuleCheck { n: "23", name: "No hand edits to generated files", status: "absent", emits: "",          note: "depends on 22" },
+    RuleCheck { n: "24", name: "Divergence vs evidence (L5)", status: "absent", emits: "",              note: "sheet-vs-producer reconciliation is not implemented" },
+    RuleCheck { n: "25", name: "Context packs within budget (L6)", status: "absent", emits: "",         note: "no view/context-pack machinery yet" },
+    RuleCheck { n: "26", name: "Dead columns (L6)",    status: "absent",      emits: "",               note: "cannot run without emitters to consume columns" },
+    RuleCheck { n: "27", name: "Emitter determinism (L7)", status: "absent",  emits: "",               note: "no emitter and no clean-rebuild comparison" },
+    RuleCheck { n: "28", name: "Row count sanity",     status: "absent",      emits: "",               note: "no last-commit comparison" },
+    RuleCheck { n: "+",  name: "Mode B evidence on every row (MDD 8.9)", status: "implemented", emits: "E-L2-NOEVIDENCE", note: "applies to sheets whose manifest says evidence: required" },
+    RuleCheck { n: "+",  name: "Emitter version agreement", status: "implemented", emits: "E-L0-EMITTER", note: "manifest version vs doctrine emitter_version" },
+];
+
+/// (implemented, partial, unexercised, absent)
+pub fn rules_summary() -> (usize, usize, usize, usize) {
+    let mut a = (0, 0, 0, 0);
+    for r in RULES {
+        match r.status {
+            "implemented" => a.0 += 1,
+            "partial" => a.1 += 1,
+            "unexercised" => a.2 += 1,
+            _ => a.3 += 1,
+        }
+    }
+    a
+}
+
+pub fn rules_report() -> String {
+    let mut out = String::new();
+    let (i, p, u, a) = rules_summary();
+    let total = RULES.len();
+    let enforced = i + p + u;
+    let _ = writeln!(
+        out,
+        "PREFLIGHT RULE COVERAGE  {enforced} of {total} MDD checks exist in this engine\n  implemented {i}   partial {p}   unexercised {u}   absent {a}\n\n  {:<3} {:<38} {:<12} {:<24} {}",
+        "#", "check", "status", "emits", "note"
+    );
+    for r in RULES {
+        let _ = writeln!(out, "  {:<3} {:<38} {:<12} {:<24} {}", r.n, r.name, r.status, r.emits, r.note);
+    }
+    out
 }

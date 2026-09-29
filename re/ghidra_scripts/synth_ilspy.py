@@ -18,6 +18,8 @@ id. Every row carries ref_addr + ref_conf + evidence (MDD 8.9 / O16).
 """
 from __future__ import annotations
 
+import json
+import math
 import os
 import re
 import sys
@@ -208,6 +210,26 @@ def rel_artifact(path: str) -> str:
     return "ilspy/" + os.path.relpath(path, os.path.join(EXPORTS, "ilspy")).replace("\\", "/")
 
 
+def ghidra_edge_count():
+    """Read the Ghidra call-graph measurement so the sheet states a measured
+    number rather than a remembered one (MDD instrumentation rule: never
+    hand-maintain a number that can be derived)."""
+    p = os.path.join(EXPORTS, "ghidra", "callgraph.json")
+    if not os.path.exists(p):
+        return None, None
+    raw = open(p, encoding="utf-8", errors="replace").read()
+    starts = [i for i in (raw.find("["), raw.find("{")) if i >= 0]
+    if not starts:
+        return None, None
+    try:
+        d = json.loads(raw[min(starts):])
+    except json.JSONDecodeError:
+        return None, None
+    if isinstance(d, list) and d and isinstance(d[0], dict):
+        return d[0].get("edge_count"), d[0].get("node_count")
+    return None, None
+
+
 # ---------------------------------------------------------------------------
 # main scan
 # ---------------------------------------------------------------------------
@@ -244,9 +266,19 @@ class TypeReader:
     def _read_type(self, start: int, decl_kind: str, decl_name: str) -> tuple[dict, int]:
         """Return (type record, index just past this type's closing brace)."""
         decl_name = decl_name.lstrip("@")
-        # constructors are named after the type; the accurate name is the one in
-        # the declaration, so reset it even if a previous match grabbed something
-        t = {"kind": decl_kind, "name": decl_name, "fields": 0, "props": 0, "methods": []}
+        t = {"kind": decl_kind, "name": decl_name, "fields": 0, "props": 0,
+             "methods": [], "bases": [], "sigtext": []}
+
+        # base types and interfaces sit on the declaration line: `: Bar, IBaz`
+        decl_line = self.lines[start]
+        idx = decl_line.find(decl_name)
+        rest = decl_line[idx + len(decl_name):] if idx >= 0 else ""
+        if ":" in rest:
+            basepart = re.sub(r"<[^>]*>", "", rest.split(":", 1)[1].split("{")[0])
+            for b in basepart.split(","):
+                b = b.strip().split(".")[-1].strip()
+                if b and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", b):
+                    t["bases"].append(b)
         depth = 0
         began = False
         i = start
@@ -285,7 +317,9 @@ class TypeReader:
                                 if name == "this":
                                     name = "this[]"
                                 kind = "accessor" if name.startswith(("get_", "set_")) else "method"
-                                t["methods"].append((name, stripped.split("{")[0].strip(), kind))
+                                sig = stripped.split("{")[0].strip()
+                                t["methods"].append((name, sig, kind))
+                                t["sigtext"].append(sig)
             i += 1
         return t, i
 
@@ -297,6 +331,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
 
     types_rows: list[list[str]] = []
     methods_rows: list[list[str]] = []
+    records: list[dict] = []
     seen_types: set[str] = set()
     seen_method_ids: dict[str, int] = {}
     seen_type_ids: dict[str, int] = {}
@@ -341,9 +376,15 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
             if uniq_t:
                 tid = f"{tid}_{uniq_t}"
             types_rows.append([
-                tid, kind, ns_final or "-", decl_name, str(t["fields"]), "-", "todo",
+                tid, kind, ns_final or "-", decl_name, str(t["fields"]),
+                ",".join(t["bases"]) if t["bases"] else "-", "todo",
                 artifact, f"ilspy:{artifact}", "certain", f"ilspycmd {artifact}",
             ])
+            records.append({
+                "tid": tid, "full": full, "fields": t["fields"],
+                "methods": t["methods"], "bases": t["bases"],
+                "sigtext": t["sigtext"], "artifact": artifact,
+            })
 
             counts: dict[str, int] = {}
             for name, sig, mkind in t["methods"]:
@@ -371,17 +412,87 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
 
     stats["types"] = len(types_rows)
     stats["unmatched_types"] = len(set(ent_kind) - seen_types)
-    return types_rows, methods_rows, stats
+
+    # -----------------------------------------------------------------------
+    # managed type-dependency edges -> re/callgraph.tsv
+    #
+    # dec013: Ghidra decoded 0 instructions, so it yields no edges at all
+    # (`ghidra graph calls` reports edge_count=0). The managed dependency graph
+    # is therefore derived from the decompiled C# declarations instead: a base
+    # type or interface is `inherits`, a type named in a method signature is
+    # `uses`. Only unambiguous short names resolve; a name shared by several
+    # types is skipped rather than guessed at.
+    # -----------------------------------------------------------------------
+    short_map: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for _k, full in entities:
+        short = split_ns(full)[1]
+        if short in short_map and short_map[short] != full:
+            ambiguous.add(short)
+        else:
+            short_map[short] = full
+    for a in ambiguous:
+        short_map.pop(a, None)
+    stats["ambiguous_short_names"] = len(ambiguous)
+
+    id_by_full = {r["full"]: r["tid"] for r in records}
+    edges: dict[str, list[str]] = {}
+    for rec in records:
+        toks = set(rec["bases"])
+        for s in rec["sigtext"]:
+            toks.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", s))
+        for tok in toks:
+            tgt_full = short_map.get(tok)
+            if not tgt_full or tgt_full == rec["full"]:
+                continue
+            tgt = id_by_full.get(tgt_full)
+            if not tgt:
+                continue
+            kind = "inherits" if tok in rec["bases"] else "uses"
+            eid = re.sub(r"[^a-z0-9_.]+", "_", f"{rec['tid']}__{tgt}__{kind}").strip("_")
+            edges[eid] = [
+                eid, rec["tid"], tgt, kind, "identified",
+                f"ilspy:{rec['artifact']}", "probable",
+                f"ilspycmd C# declaration references {tok}",
+            ]
+    callgraph_rows = list(edges.values())
+    stats["edges"] = len(callgraph_rows)
+
+    # -----------------------------------------------------------------------
+    # triage from measured managed evidence -> re/triage.tsv
+    #
+    # MDD 8.5 scores a function by log(size) and xrefs. Neither is available
+    # here: Ghidra decoded no code (dec013), so its `size` is a metadata record
+    # length and its xrefs are all zero. Scoring those would be scoring nothing.
+    # Fields and methods per type ARE measured exactly from the decompiled
+    # source, so they are the honest size proxy.
+    # -----------------------------------------------------------------------
+    triage_rows: list[list[str]] = []
+    for rec in records:
+        f = rec["fields"]
+        m = len(rec["methods"])
+        score = 2.0 * math.log2(1 + f) + 3.0 * math.log2(1 + m)
+        prio = 1 if score >= 12 else (2 if score >= 8 else 3)
+        triage_rows.append([
+            rec["tid"], f"fields={f};methods={m}", f"{score:.2f}", str(prio), "todo",
+            f"ilspy:{rec['artifact']}", "probable",
+            f"ILSpy measured fields={f} methods={m}; size proxy, because Ghidra size is unusable (dec013)",
+        ])
+    stats["triage"] = len(triage_rows)
+
+    return types_rows, methods_rows, triage_rows, callgraph_rows, stats
 
 
 def main() -> int:
     if not os.path.isdir(EXPORTS):
         print(f"no exports dir at {EXPORTS}", file=sys.stderr)
         return 1
-    types_rows, methods_rows, stats = scan()
+    types_rows, methods_rows, triage_rows, callgraph_rows, stats = scan()
 
     tpath = os.path.join(ROOT, "sheets", "re", "types.tsv")
     mpath = os.path.join(ROOT, "sheets", "re", "methods.tsv")
+    gpath = os.path.join(ROOT, "sheets", "re", "callgraph.tsv")
+    trpath = os.path.join(ROOT, "sheets", "re", "triage.tsv")
 
     theader = manifest(
         "re/types", "types", "sheets/re", "re/sources", "D1",
@@ -396,9 +507,41 @@ def main() -> int:
     nt = write_tsv(tpath, theader, types_rows)
     nm = write_tsv(mpath, mheader, methods_rows)
 
+    # re/callgraph.tsv is owned by the managed producer, because it is the only
+    # producer that can see edges on this target (dec013).
+    gec, gnc = ghidra_edge_count()
+    gheader = manifest(
+        "re/callgraph", "callgraph_managed", "sheets/re", "re/types", "D1",
+        extra=(
+            "# Edges. Cycles here are informative, not errors: SCCs are usually subsystems.\n"
+            f"# PROVENANCE: Ghidra contributed none of these. `ghidra graph calls` returned\n"
+            f"# edge_count={gec} over node_count={gnc} because Ghidra decoded 0 instructions\n"
+            "# for this managed binary (dec013). The edges are derived instead from the\n"
+            "# decompiled C# declarations: base/interface -> inherits, a type named in a\n"
+            "# method signature -> uses. Ambiguous short names are skipped, not guessed.\n"
+            "# id_form: compound"
+        ),
+    ) + "id:string*\tfrom:string\tto:string\tkind:string\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
+    ng = write_tsv(gpath, gheader, callgraph_rows)
+
+    trheader = manifest(
+        "re/triage", "triage_managed", "sheets/re", "re/types", "D1",
+        extra=(
+            "# Porting-order work queue, scored from MEASURED managed evidence.\n"
+            "# MDD 8.5 scores log(size) and xrefs; both are unavailable because Ghidra\n"
+            "# decoded no code (dec013), so this scores fields and methods per type,\n"
+            "# which ILSpy measured exactly. ref_conf is 'probable': the counts are\n"
+            "# certain, the choice of them as a size proxy is a judgement.\n"
+            "# id_form: compound"
+        ),
+    ) + "id:string*\treason:string\tscore:f32\tpriority:u8\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
+    ntr = write_tsv(trpath, trheader, triage_rows)
+
     print(f"files scanned      {stats['files']}")
     print(f"types              {nt}")
     print(f"methods            {nm}")
+    print(f"callgraph edges    {ng}   (ambiguous short names skipped: {stats['ambiguous_short_names']})")
+    print(f"triage             {ntr}   (from measured fields/methods, not Ghidra size)")
     print(f"fields (counted)   {stats['fields']}")
     print(f"ctors              {stats['ctors']}")
     print(f"properties         {stats['props']}")

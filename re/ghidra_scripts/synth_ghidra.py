@@ -52,6 +52,14 @@ def load(name: str):
     raw = io.open(p, encoding="utf-8", errors="replace").read().strip()
     if not raw:
         return None
+    # ghidra-cli prints bridge chatter ("Starting Ghidra bridge...\nBridge
+    # ready.") to the same stream before the payload when it has to start the
+    # bridge, so skip everything before the first JSON delimiter. Silently
+    # returning None here would have hidden a real data file.
+    starts = [i for i in (raw.find("["), raw.find("{")) if i >= 0]
+    if not starts:
+        return None
+    raw = raw[min(starts):]
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -92,10 +100,23 @@ def write(path: str, header: str, rows: list[list[str]]) -> int:
 # functions -> functions.tsv, triage.tsv
 # ---------------------------------------------------------------------------
 
-def do_functions() -> tuple[int, int]:
+def do_functions() -> int:
+    """re/functions.tsv from ghidra's CLI symbol table.
+
+    IMPORTANT (dec013): `ghidra stats` reports instructions=0 for this binary.
+    Ghidra's CLI analyzer created 18300 function objects carrying names and
+    addresses read from the .NET metadata, but decoded NO machine code, so a
+disassembly request fails with "No instruction at address". Consequently:
+    - `size` is NOT a code size and must not be read as complexity,
+    - `calls`/`called_by` are unknown (they are recorded as 0 and flagged),
+    - no call-graph edges exist (see re/callgraph.tsv),
+    - MDD 8.5 triage scoring is meaningless here and is NOT emitted.
+
+    The rows are still worth keeping: this is a real symbol inventory, and it is
+    the provenance that ties 18300 addresses to managed method names.
+    """
     funcs = load("functions.json") or []
     interesting = load("interesting.json") or []
-    crypto = load("crypto.json") or []
 
     inter_addrs = set()
     if isinstance(interesting, list):
@@ -104,10 +125,8 @@ def do_functions() -> tuple[int, int]:
                 a = it.get("address") or it.get("addr")
                 if a:
                     inter_addrs.add(str(a).lstrip("0x").lower())
-    crypto_n = len(crypto) if isinstance(crypto, list) else 0
 
     rows: list[list[str]] = []
-    triage: list[list[str]] = []
     for f in funcs:
         if not isinstance(f, dict):
             continue
@@ -115,45 +134,22 @@ def do_functions() -> tuple[int, int]:
         name = str(f.get("name", ""))
         size = int(f.get("size", 0) or 0)
         fid = f"fn_{addr.lower()}"
-        # Ghidra recovered managed method names, so a non-FUN_ name is a real symbol
-        named = 0.0 if name.startswith(("FUN_", "thunk_", "SUB_")) else 1.0
-        thunk = 1.0 if (name.startswith(("thunk_",)) or size <= 8) else 0.0
-        near_str = 1.0 if addr.lstrip("0x").lower() in inter_addrs else 0.0
-        score = (
-            3.0 * math.log2(1 + size)
-            + 5.0 * named
-            + 4.0 * near_str
-            - 2.0 * thunk
-        )
+        named = "-" if name.startswith(("FUN_", "thunk_", "SUB_")) else "managed_name"
         rows.append([
-            fid, name, "0x" + addr.lower(), str(size), "0", "0", "-", "identified",
+            fid, name, "0x" + addr.lower(), str(size), "0", "0", named, "symbol_only",
             "ghidra/functions.json", "0x" + addr.lower(), "certain",
-            f"ghidra function list; size={size}",
-        ])
-        triage.append([
-            fid, f"size_bucket={size};named={int(named)};thunk={int(thunk)}",
-            f"{score:.2f}", "1" if score >= 12 else ("2" if score >= 8 else "3"),
-            "todo", "0x" + addr.lower(), "probable",
-            "ghidra triage score (MDD 8.5 reduced: size, symbol, interesting-proximity)",
+            f"ghidra CLI symbol record; NO instructions decoded (dec013), so size={size} is a metadata record length, not code size",
         ])
 
-    nf = write(
-        os.path.join(ROOT, "sheets", "re", "functions.tsv"),
+    header = (
         manifest("re/functions", "functions", "re/sources",
-                 "Native/PE-side function inventory from Ghidra. One row per function.") +
-        "id:string*\tname:string\taddr:string\tsize:u32\tcalls:u16\tcalled_by:u16\ttags:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n",
-        rows,
+                 "CLI-managed symbol inventory from Ghidra. One row per symbol record.\n# dec013: instructions=0, so size/calls/called_by are NOT code measurements.") +
+        "id:string*\tname:string\taddr:string\tsize:u32\tcalls:u16\tcalled_by:u16\ttags:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     )
-    nt = write(
-        os.path.join(ROOT, "sheets", "re", "triage.tsv"),
-        manifest("re/triage", "triage", "re/functions,re/methods",
-                 "Function triage; score follows MDD 8.5 (log size, xrefs, string proximity,\n# entry proximity, named symbol, interesting hits, minus thunk-likeness).") +
-        "id:string*\treason:string\tscore:f32\tpriority:u8\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n",
-        triage,
-    )
-    print(f"functions          {nf}")
-    print(f"triage             {nt}   (interesting hits: {len(inter_addrs)}, crypto hits: {crypto_n})")
-    return nf, nt
+    n = write(os.path.join(ROOT, "sheets", "re", "functions.tsv"), header, rows)
+    print(f"functions          {n}   (symbol records, status=symbol_only)")
+    print(f"interesting hits   {len(inter_addrs)}   (note: no code, so proximity is not meaningful)")
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +310,30 @@ def do_assets() -> int:
     return n
 
 
+def do_callgraph() -> int:
+    """Check the Ghidra call-graph measurement. Writes NO sheet.
+
+    dec013: Ghidra decoded 0 instructions for this binary, so there are no CALL
+    references to walk and `ghidra graph calls` returns edge_count=0.
+
+    This producer must not write re/callgraph.tsv: the managed producer owns
+    that sheet, because it is the only one that can see edges on this target.
+    Writing an empty sheet here would clobber real edges whenever the scripts
+    run in a different order. Instead we record and assert the measurement.
+    """
+    g = load("callgraph.json")
+    edge_count = None
+    node_count = None
+    if isinstance(g, list) and g and isinstance(g[0], dict):
+        edge_count = g[0].get("edge_count")
+        node_count = g[0].get("node_count")
+
+    print(f"ghidra callgraph   edge_count={edge_count} over node_count={node_count} (expected 0: no decoded code)")
+    if edge_count not in (0, None):
+        print("    WARNING: ghidra reported edges, which contradicts dec013; investigate before trusting re/callgraph.tsv")
+    return 0 if edge_count in (0, None) else 1
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -326,6 +346,7 @@ def main() -> int:
     do_types()
     do_strings()
     do_assets()
+    do_callgraph()
     return 0
 
 
