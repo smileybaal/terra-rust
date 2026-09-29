@@ -100,6 +100,7 @@ re_strings.length	re/strings	length	u16	-	no	-	-	v_full	-
 re_strings.x_refs	re/strings	x_refs	u16	-	no	-	-	v_full	-
 re_strings.use	re/strings	use	string	-	no	-	-	v_full	-
 re_strings.status	re/strings	status	string	-	no	-	-	v_full	-
+re_strings.artifact	re/strings	artifact	string	-	no	-	-	v_full	-
 re_strings.ref_addr	re/strings	ref_addr	string	-	no	-	-	v_full	-
 re_strings.ref_conf	re/strings	ref_conf	string	-	no	-	-	v_full	-
 re_strings.evidence	re/strings	evidence	string	-	no	-	-	v_full	-

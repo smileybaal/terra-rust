@@ -32,6 +32,19 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 EXPORTS = os.path.join(ROOT, "re", "exports", "ghidra")
 
 
+# ---------------------------------------------------------------------------
+# content root
+# ---------------------------------------------------------------------------
+
+# The game's Content directory is an INPUT, not a checked-in artifact: it is
+# large (495 MB, 15994 .xnb) and it belongs to the user's own installation.
+# Override with CONTENT_DIR; the default matches the Steam layout.
+CONTENT_DIR = os.environ.get(
+    "CONTENT_DIR",
+    r"C:\Steam\steamapps\common\Terraria\Content",
+)
+
+
 def load(name: str):
     p = os.path.join(EXPORTS, name)
     if not os.path.exists(p):
@@ -188,6 +201,119 @@ def do_types() -> int:
     return n
 
 
+def do_strings() -> int:
+    """re/strings.tsv from ghidra's recovered string table.
+
+    dec008: rows whose text contains TAB or newline are excluded. The canonical
+    TSV form forbids unescaped tabs, and a string table is exactly where they
+    occur (several entries here are whole embedded files).
+    """
+    strings = load("strings_all.json")
+    if not isinstance(strings, list):
+        return 0
+    rows = []
+    seen: dict[str, int] = {}
+    excluded = 0
+    for s in strings:
+        if not isinstance(s, dict):
+            continue
+        addr = str(s.get("address", ""))
+        val = str(s.get("value", ""))
+        length = s.get("length", 0)
+        if not addr:
+            continue
+        if "\t" in val or "\n" in val or "\r" in val:
+            excluded += 1
+            continue
+        # An empty string is a real value in a string table, not a missing one;
+        # NULL is the canonical explicit marker (MDD 5.2), so use it rather than
+        # an empty cell (which would mean "not specified").
+        text = val if val else "NULL"
+        sid = f"str_{addr.lower()}"
+        n = seen.get(sid, 0)
+        seen[sid] = n + 1
+        if n:
+            sid = f"{sid}_{n}"
+        rows.append([
+            sid, "0x" + addr.lower(), text, str(length), "0", "unknown", "identified",
+            "ghidra/strings_all.json", "0x" + addr.lower(), "certain",
+            f"ghidra find string; length={length}",
+        ])
+    header = (
+        manifest("re/strings", "strings", "re/sources",
+                 "String table from Ghidra. Rows whose text contains TAB or newline are\n# excluded (dec008).") +
+        "id:string*\taddr:string\ttext:string\tlength:u16\tx_refs:u16\tuse:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
+    )
+    n = write(os.path.join(ROOT, "sheets", "re", "strings.tsv"), header, rows)
+    print(f"strings            {n}   (excluded for TAB/newline: {excluded})")
+    return n
+
+
+def do_assets() -> int:
+    """re/assets.tsv from the asset manifest embedded in the binary.
+
+    One recovered string is the game's own content table: a TSV with
+    Path/Width/Height columns. Reusing it is far better evidence than guessing
+    asset names, and it ties directly to the on-disk Content directory.
+    """
+    strings = load("strings_all.json")
+    if not isinstance(strings, list):
+        return 0
+    manifest_txt = None
+    for s in strings:
+        if isinstance(s, dict) and str(s.get("value", "")).startswith("Path\tWidth\tHeight"):
+            manifest_txt = str(s["value"])
+            addr = str(s.get("address", ""))
+            break
+    if manifest_txt is None:
+        print("assets             skipped (no embedded content manifest found)")
+        return 0
+
+    if not os.path.isdir(CONTENT_DIR):
+        print(f"assets             skipped (CONTENT_DIR not found: {CONTENT_DIR})")
+        return 0
+
+    rows = []
+    seen: dict[str, int] = {}
+    for line in manifest_txt.split("\n")[1:]:
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        path, w, h = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        if not path:
+            continue
+        aid = re.sub(r"[^a-z0-9_.]+", "_", path.lower()).strip("_") or "unnamed"
+        n = seen.get(aid, 0)
+        seen[aid] = n + 1
+        if n:
+            aid = f"{aid}_{n}"
+        on_disk = os.path.join(CONTENT_DIR, path.replace("/", os.sep) + ".xnb")
+        if os.path.isfile(on_disk):
+            status = "found"
+            size = str(os.path.getsize(on_disk))
+        else:
+            status = "missing"
+            # NULL is the explicit "do not default" marker (MDD 5.2). The asset
+            # is not on disk, so its size is genuinely unknown -- an empty cell
+            # would incorrectly imply "inherit the column default".
+            size = "NULL"
+        rows.append([
+            aid, path, size, "NULL", "xnb", status,
+            "0x%s" % addr.lower(), "certain",
+            "embedded Path/Width/Height manifest; dims %sx%s" % (w, h),
+        ])
+    header = (
+        manifest("re/assets", "assets", "re/sources",
+                 "Content inventory. Source is the Path/Width/Height manifest embedded in the\n# binary itself, cross-checked against re/content.\n# id_form: compound") +
+        "id:string*\tpath:string\tsize:u64\tsha256:string\tloader:string\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
+    )
+    n = write(os.path.join(ROOT, "sheets", "re", "assets.tsv"), header, rows)
+    print(f"assets             {n}")
+    found = sum(1 for r in rows if r[5] == "found")
+    print(f"assets on disk     {found} / {len(rows)}")
+    return n
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -198,6 +324,8 @@ def main() -> int:
         return 1
     do_functions()
     do_types()
+    do_strings()
+    do_assets()
     return 0
 
 
