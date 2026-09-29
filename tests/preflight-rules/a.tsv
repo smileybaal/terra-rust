@@ -1,0 +1,21 @@
+# sheet: a
+# version: 1
+# generator: fixture
+# target: scratch
+# index: by_id
+# requires: b
+# owned_by: verifier
+# doctrine: D1
+# Fixture for preflight rule coverage. It deliberately breaks these rules:
+#   E-L1-DEFAULT  `reload` declares default 'abc', which is not an f32, and no
+#                 row supplies a value. Note the grammar needs ' =value' with a
+#                 leading space (MDD 5.3); 's=abc' would be read as part of the
+#                 unit instead, which is itself worth knowing.
+#   E-L1-EMPTY    `label` is required and empty in both rows.
+#   E-L1-UNIT     `speed` is m/s here and kph in b.tsv.
+#   E-L2-CYCLE    a requires b and b requires a.
+#   E-L2-TOPO     the same cycle means no topological order exists.
+#   W-L0-SHORT    the second row omits its trailing empty cells (dec004).
+id:string*	speed:f32 m/s	reload:f32 s =abc	label:string
+x	1.5		
+z	2.5

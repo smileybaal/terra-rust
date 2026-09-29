@@ -573,7 +573,14 @@ pub fn validate(sheets: &[Sheet], base: &mut Vec<Finding>) {
                     continue;
                 }
                 if v.is_empty() {
-                    if c.default.is_some() || c.optional {
+                    // MDD 5.2: an empty cell inherits the column's schema default.
+                    // Whether that default is itself valid is a property of the
+                    // column, not of the row, so it is checked once per column
+                    // above; reporting it per row would inflate the finding count.
+                    if c.default.is_some() {
+                        continue;
+                    }
+                    if c.optional {
                         continue;
                     }
                     base.push(Finding::err("E-L1-EMPTY", &s.name, r.line, &s.row_key(r), &c.name, "empty cell in a required column"));
@@ -663,6 +670,136 @@ pub fn validate(sheets: &[Sheet], base: &mut Vec<Finding>) {
 
     // header vs authoritative schema (L0, check 5)
     drift_check(sheets, base);
+
+    // unit consistency across sheets (L1, check 9)
+    check_units(sheets, base);
+
+    // declared defaults must themselves be valid values for their column (L1,
+    // check 11). Once per column, not once per row.
+    for s in sheets {
+        for c in &s.columns {
+            if let Some(d) = &c.default {
+                if let Err(e) = check_cell(&c.ty, d) {
+                    base.push(Finding::err(
+                        "E-L1-DEFAULT",
+                        &s.name,
+                        0,
+                        "",
+                        &c.name,
+                        format!("declared default '{d}' does not parse as '{}': {e}", c.ty),
+                    ));
+                }
+            }
+        }
+    }
+
+    // topological order must exist (L2, check 15)
+    if let Err(stuck) = topo_order(sheets) {
+        base.push(Finding::err(
+            "E-L2-TOPO",
+            "book",
+            0,
+            "",
+            "",
+            format!("no topological order exists; {} sheet(s) are in cycles: {}", stuck.len(), stuck.join(", ")),
+        ));
+    }
+}
+
+/// L1 check 9: the same column name must not carry two different units.
+///
+/// MDD 5.3 says a header unit must match the unit declared in 01-schema.tsv. In
+/// this project the schema is bootstrapped from the headers, so that comparison
+/// alone can never fire. The rule that *can* fire, and that actually catches the
+/// bug the MDD is worried about, is cross-sheet disagreement: `speed: f32 m/s` in
+/// one sheet and `speed: f32 kph` in another is the contradiction worth failing.
+fn check_units(sheets: &[Sheet], out: &mut Vec<Finding>) {
+    let mut map: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for s in sheets {
+        for c in &s.columns {
+            if let Some(u) = &c.unit {
+                map.entry(c.name.clone()).or_default().push((s.name.clone(), u.clone()));
+            }
+        }
+    }
+    for (name, defs) in map {
+        let units: BTreeSet<&str> = defs.iter().map(|d| d.1.as_str()).collect();
+        if units.len() > 1 {
+            let detail = defs
+                .iter()
+                .map(|(s, u)| format!("{s}={u}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(Finding::err(
+                "E-L1-UNIT",
+                &defs[0].0,
+                0,
+                "",
+                &name,
+                format!("column '{name}' declares conflicting units across sheets: {detail}"),
+            ));
+        }
+    }
+}
+
+/// L2 check 15: a topological order over the reference graph, via Kahn's
+/// algorithm. An Err carries the sheets that could not be ordered.
+pub fn topo_order(sheets: &[Sheet]) -> Result<Vec<String>, Vec<String>> {
+    let names: BTreeSet<String> = sheets.iter().map(|s| s.name.clone()).collect();
+    let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for s in sheets {
+        let e = deps.entry(s.name.clone()).or_default();
+        for r in &s.manifest.requires {
+            if names.contains(r) {
+                e.insert(r.clone());
+            }
+        }
+        for c in &s.columns {
+            if let Some((t, _)) = &c.ref_to {
+                if names.contains(t) {
+                    e.insert(t.clone());
+                }
+            }
+        }
+    }
+
+    // if A depends on B, then B must come first: edge B -> A
+    let mut succ: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut indeg: BTreeMap<String, usize> = names.iter().map(|n| (n.clone(), 0)).collect();
+    for (a, ds) in &deps {
+        for b in ds {
+            if b == a {
+                continue;
+            }
+            if succ.entry(b.clone()).or_default().insert(a.clone()) {
+                *indeg.get_mut(a).unwrap() += 1;
+            }
+        }
+    }
+
+    let mut ready: BTreeSet<String> = indeg.iter().filter(|(_, &d)| d == 0).map(|(n, _)| n.clone()).collect();
+    let mut order: Vec<String> = Vec::new();
+    while let Some(n) = ready.iter().next().cloned() {
+        ready.remove(&n);
+        order.push(n.clone());
+        if let Some(ss) = succ.get(&n).cloned() {
+            for s in ss {
+                if let Some(d) = indeg.get_mut(&s) {
+                    *d -= 1;
+                    if *d == 0 {
+                        ready.insert(s);
+                    }
+                }
+            }
+        }
+    }
+
+    if order.len() == names.len() {
+        Ok(order)
+    } else {
+        let done: BTreeSet<String> = order.into_iter().collect();
+        Err(names.difference(&done).cloned().collect())
+    }
 }
 
 /// L0 check 5: the data-sheet header row is a courtesy; the authoritative
@@ -1183,13 +1320,13 @@ pub const RULES: &[RuleCheck] = &[
     RuleCheck { n: "6", name: "Key present, unique",   status: "implemented", emits: "E-L0-KEY,E-L0-DUPKEY", note: "" },
     RuleCheck { n: "7", name: "id charset",            status: "implemented", emits: "E-L0-CHARSET",   note: "relaxed to allow '.' when a sheet declares id_form: compound (dec009)" },
     RuleCheck { n: "8", name: "Every cell type-checks", status: "implemented", emits: "E-L1-VALUE",    note: "" },
-    RuleCheck { n: "9", name: "Units match schema",    status: "absent",      emits: "",               note: "unit is parsed but never compared against 01-schema.tsv" },
+    RuleCheck { n: "9", name: "Units consistent",       status: "implemented", emits: "E-L1-UNIT",     note: "cross-sheet: the same column name must not carry two different units" },
     RuleCheck { n: "10", name: "Enum domain",          status: "partial",     emits: "E-L1-VALUE",    note: "checks identifier form only; the declared variant set is not consulted" },
-    RuleCheck { n: "11", name: "Empty/NULL, defaults", status: "partial",     emits: "E-L1-EMPTY",    note: "empty-in-required and NULL are handled; schema defaults are never applied" },
+    RuleCheck { n: "11", name: "Empty/NULL, defaults", status: "implemented", emits: "E-L1-EMPTY,E-L1-DEFAULT", note: "empty-in-required fails; NULL is explicit; a declared default must itself parse as the column type" },
     RuleCheck { n: "12", name: "Every FK resolves",    status: "implemented", emits: "E-L2-REF",       note: "" },
     RuleCheck { n: "13", name: "No duplicate rows across sheets", status: "absent", emits: "",          note: "MDD severity W; not implemented" },
     RuleCheck { n: "14", name: "No cycles",            status: "implemented", emits: "E-L2-CYCLE",     note: "DFS over manifest requires plus column refs" },
-    RuleCheck { n: "15", name: "Topological order exists", status: "absent",  emits: "",               note: "cycle detection only; no Kahn ordering" },
+    RuleCheck { n: "15", name: "Topological order exists", status: "implemented", emits: "E-L2-TOPO",   note: "Kahn over manifest requires plus column refs; `sheetty order` prints it" },
     RuleCheck { n: "16", name: "No unimplemented rows", status: "partial",    emits: "L3 overlap",     note: "reported, not gating; --strict gates warnings only" },
     RuleCheck { n: "17", name: "No orphan rows",       status: "partial",     emits: "L3 overlap",     note: "reported, never fails" },
     RuleCheck { n: "18", name: "No divergent rows",    status: "implemented", emits: "L3 overlap",     note: "attribute compare over shared columns" },

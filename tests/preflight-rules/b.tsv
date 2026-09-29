@@ -1,0 +1,10 @@
+# sheet: b
+# version: 1
+# generator: fixture
+# target: scratch
+# index: by_id
+# requires: a
+# owned_by: verifier
+# doctrine: D1
+id:string*	speed:f32 kph
+y	2.5

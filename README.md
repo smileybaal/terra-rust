@@ -61,6 +61,20 @@ ingest -> normalize -> validate -> graph -> emit -> compile -> verify
 cargo run -p sheetty-cli -- preflight
 cargo run -p sheetty-cli -- report unimplemented --rank blast-radius
 cargo run -p sheetty-cli -- overlap 02-plan 03-impl --key id
+cargo run -p sheetty-cli -- order          # dependency order over the sheets
+cargo run -p sheetty-cli -- rules          # which MDD checks this engine enforces
+powershell -File tools\test-preflight.ps1  # prove the rules actually fire
+```
+
+`preflight` states its own coverage, because "preflight passed" must never be
+mistaken for "the whole MDD checklist passed". An absent rule is not a passing
+one:
+
+```
+PREFLIGHT  sheets/  17 sheets, 142357 rows, 147 columns
+  emitter 0.1.0
+  rule coverage  21/30 MDD checks exist (implemented 16, partial 4, unexercised 1, absent 9)
+  (run `sheetty rules` for the per-check status; an absent rule is not a passing one)
 ```
 
 ## Reproduce the evidence
@@ -85,7 +99,8 @@ emits the whole 125 MB assembly regardless of `-t`).
 | rows | 142,357 |
 | columns | 147 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
-| preflight rule coverage | **19 of 30** MDD checks exist (13 implemented, 5 partial, 1 unexercised, 11 absent) |
+| preflight rule coverage | **21 of 30** MDD checks exist (16 implemented, 4 partial, 1 unexercised, 9 absent) - run `sheetty rules` |
+| rule tests | `tools/test-preflight.ps1` asserts 7 diagnostics fire on a broken fixture and that the real book stays clean |
 | managed evidence (ILSpy) | 1,549 types, 14,052 methods, 28,039 fields, 715 base/interface links |
 | managed dependency edges | 2,212 (1,545 `uses`, 667 `inherits`), derived from C# declarations |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk |

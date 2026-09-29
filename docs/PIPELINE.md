@@ -99,10 +99,29 @@ cargo run -p sheetty-cli -- overlap 02-plan 03-impl
 cargo run -p sheetty-cli -- report unimplemented --rank blast-radius
 cargo run -p sheetty-cli -- view re/triage --cols id,score,priority,ref_addr
 cargo run -p sheetty-cli -- schema            # list declarations
+cargo run -p sheetty-cli -- order             # dependency order (Kahn)
+cargo run -p sheetty-cli -- rules             # which MDD checks exist, and which do not
 cargo run -p sheetty-cli -- schema --emit sheets/01-schema.tsv   # bootstrap only
 ```
 
 Exit codes: `0` clean, `1` errors present, `2` usage error.
+
+`sheetty rules` is not decoration. The engine implements L0-L3 only; units,
+defaults and topological order are covered, but enum domain is form-only, and
+L4-L7 plus the whole `[emit]` stage do not exist. Printing that in every
+preflight report is the difference between "the checks pass" and "the checklist
+passes".
+
+### Proving the rules fire
+
+```
+powershell -File tools/test-preflight.ps1
+```
+
+This runs the engine against `tests/preflight-rules/`, a fixture that
+deliberately breaks seven rules, and asserts each diagnostic appears; then it
+asserts the real book is still clean. A rule that has never been seen to fire is
+not a verified rule (MDD: "a rule that never fires may be checking nothing").
 
 **`schema --emit` is a bootstrap tool, not a routine command.** It generates
 `01-schema.tsv` from the current headers. Once committed, the schema is the

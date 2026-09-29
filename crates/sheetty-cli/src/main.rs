@@ -18,6 +18,7 @@ commands:
   view <SHEET> [--cols a,b,c] [--out FILE] [--sheets DIR]
   schema [--sheets DIR] [--json] [--emit PATH]
   rules   print which MDD preflight checks this engine implements
+  order   print a topological order of the sheets (dependency order)
 "
 }
 
@@ -36,6 +37,23 @@ fn main() -> ExitCode {
         "rules" => {
             print!("{}", rules_report());
             ExitCode::SUCCESS
+        }
+        "order" => {
+            let dir = sheets_dir(&args[1..]);
+            let (sheets, _) = load_book(&dir);
+            match topo_order(&sheets) {
+                Ok(order) => {
+                    println!("topological order ({} sheets; dependencies first)", order.len());
+                    for (i, n) in order.iter().enumerate() {
+                        println!("  {:>2}. {n}", i + 1);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(stuck) => {
+                    eprintln!("NO topological order: {} sheet(s) in cycles: {}", stuck.len(), stuck.join(", "));
+                    ExitCode::from(1)
+                }
+            }
         }
         "-h" | "--help" | "help" => {
             print!("{}", usage());
