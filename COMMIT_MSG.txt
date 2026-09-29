@@ -1,0 +1,26 @@
+evidence: Mode B extraction pipeline live; preflight clean at 120,676 rows
+
+Ghidra (via ghidra-cli 0.2.2) and ILSpy (via ilspycmd 9.1.0) both ingested
+Terraria.exe (sha256 960a03bf...). All evidence is now canonical TSV.
+
+Producers and their sheets:
+- ghidra: re/functions.tsv (18300), re/triage.tsv (18300, MDD 8.5 score),
+  re/types_pe.tsv (68268 PE data types)
+- ilspy:  re/types.tsv (1549 managed types), re/methods.tsv (14052 methods,
+  28039 fields counted)
+
+Tooling:
+- re/ghidra_scripts/synth_ilspy.py  ILSpy tree + entity lists -> sheets
+- re/ghidra_scripts/synth_ghidra.py  ghidra-cli JSON exports -> sheets
+- both emit canonical form (UTF-8 no BOM, LF, TAB), dedup by id, and carry
+  ref_addr + ref_conf + evidence on every row (MDD 8.9 / O16)
+
+Findings worth recording (sheets/decisions.tsv dec010-dec012):
+- ghidra-cli refuses managed code itself: "Ghidra cannot decompile .NET IL
+  bytecode. Consider using a .NET decompiler (e.g., ilspy-cli)". dec003 and
+  dec012 are therefore empirically confirmed, not assumed.
+- ILSpy emits no file for compiler-generated types (dec010) and inlines nested
+  types into the parent file (dec011).
+
+preflight: 17 sheets, 120,676 rows, 146 columns, 0 errors, 0 warnings.
+L0-L2 pass, L3 plan x impl is 16 covered / 0 unimplemented / 0 orphan.

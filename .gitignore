@@ -12,6 +12,9 @@
 # xlsx is a view, never the store (D7)
 **/*.xlsx
 
+__pycache__/
+*.pyc
+
 # projected docs
 /docs/generated/*
 !/docs/generated/.gitkeep

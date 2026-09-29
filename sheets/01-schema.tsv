@@ -122,6 +122,12 @@ re_types.artifact	re/types	artifact	string	-	no	-	-	v_full	-
 re_types.ref_addr	re/types	ref_addr	string	-	no	-	-	v_full	-
 re_types.ref_conf	re/types	ref_conf	string	-	no	-	-	v_full	-
 re_types.evidence	re/types	evidence	string	-	no	-	-	v_full	-
+re_types_pe.id	re/types_pe	id	string	-	no	-	-	v_full	-
+re_types_pe.kind	re/types_pe	kind	string	-	no	-	-	v_full	-
+re_types_pe.size	re/types_pe	size	string	-	no	-	-	v_full	-
+re_types_pe.name	re/types_pe	name	string	-	no	-	-	v_full	-
+re_types_pe.path	re/types_pe	path	string	-	no	-	-	v_full	-
+re_types_pe.artifact	re/types_pe	artifact	string	-	no	-	-	v_full	-
 tokens.id	tokens	id	string	-	no	-	-	v_full	-
 tokens.role	tokens	role	string	-	no	-	-	v_full	-
 tokens.agent	tokens	agent	string	-	no	-	-	v_full	-

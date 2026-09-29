@@ -12,8 +12,8 @@
 id:string*	kind:string	tool:string	tool_version:string	path:string	sha256:string	role:string	status:string	ref_addr:string	ref_conf:string	evidence:string	notes:string?
 src_binary	binary	-	-	re/binaries/Terraria.exe	960a03bff6050cf7be16dfc1a7b19e10fc2c4f8f835a6a3b135a50dd9e6ba2f3	subject	done	-	-	-	working copy; never analyse the only copy
 src_ghidra_project	project	ghidra	12.1.4	re/ghidra_projects/terraria.gpr	-	cache	done	-	-	-	regenerable from the binary plus these notes
-src_ghidra_export	export	ghidra	12.1.4	re/exports/ghidra	-	evidence	todo	-	-	-	pending bulk export with --expect
-src_ilspy_tree	csharp_tree	ilspycmd	9.1.0.7988	re/exports/ilspy	-	evidence	todo	-	-	-	full project decompile, one file per type
+src_ghidra_export	export	ghidra	12.1.4	re/exports/ghidra	-	evidence	done	0x400000	certain	ghidra-cli bulk export; 18300 functions, 68268 types, 21159 strings	functions.json + types.json + symbols.json + interesting.json + comments.json
+src_ilspy_tree	csharp_tree	ilspycmd	9.1.0.7988	re/exports/ilspy	-	evidence	done	ilspy:Terraria	certain	full project decompile, one file per type	1549 .cs files, 16.6 MB
 src_ilspy_types	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_c.txt	-	evidence	done	-	-	-	2234 classes
 src_ilspy_structs	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_s.txt	-	evidence	done	-	-	-	369 structs
 src_ilspy_enums	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_e.txt	-	evidence	done	-	-	-	170 enums
