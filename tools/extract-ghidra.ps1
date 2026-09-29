@@ -13,6 +13,14 @@ $program = "Terraria"
 $out = "re/exports/ghidra"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
+# The installed game content is an input to re/assets.tsv, not a checked-in
+# artifact. Point CONTENT_DIR at your own installation if it is not the Steam
+# default; synth_ghidra.py reads the same variable.
+if (-not $env:CONTENT_DIR) {
+    $env:CONTENT_DIR = "C:\Steam\steamapps\common\Terraria\Content"
+}
+Write-Host "CONTENT_DIR: $env:CONTENT_DIR"
+
 function Need-File {
     param([string]$Path, [int]$MinBytes)
     if (-not (Test-Path $Path)) {
@@ -51,6 +59,11 @@ Need-File "$out/types.json" 100000
 
 ghidra find interesting --project $project --json > "$out/interesting.json"
 Need-File "$out/interesting.json" 10
+
+# The full string table is the source of re/strings.tsv and, via the embedded
+# Path/Width/Height manifest, of re/assets.tsv.
+ghidra find string "" --project $project --json > "$out/strings_all.json"
+Need-File "$out/strings_all.json" 1000000
 
 ghidra find crypto --project $project --json > "$out/crypto.json"
 

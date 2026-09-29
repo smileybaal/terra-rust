@@ -51,8 +51,16 @@ ghidra function list --project terraria --json --fields name,address,size > re/e
 ghidra symbol list   --project terraria --json > re/exports/ghidra/symbols.json
 ghidra type list     --project terraria --json > re/exports/ghidra/types.json
 ghidra find interesting --project terraria --json > re/exports/ghidra/interesting.json
+ghidra find string ""   --project terraria --json > re/exports/ghidra/strings_all.json
 ghidra find crypto      --project terraria --json > re/exports/ghidra/crypto.json
 ghidra comment list     --project terraria --json > re/exports/ghidra/comments.json
+```
+
+`re/assets.tsv` additionally reads the installed content directory. Set
+`CONTENT_DIR` if your install is not at the Steam default:
+
+```
+set CONTENT_DIR=D:\Games\Terraria\Content
 ```
 
 ILSpy side:
@@ -74,7 +82,7 @@ Two calibrations learned the hard way:
 ## 4. Normalize (raw exports -> canonical sheets)
 
 ```
-python re/ghidra_scripts/synth_ghidra.py     # -> re/functions, re/triage, re/types_pe
+python re/ghidra_scripts/synth_ghidra.py     # -> re/functions, re/triage, re/types_pe, re/strings, re/assets
 python re/ghidra_scripts/synth_ilspy.py      # -> re/types, re/methods
 ```
 
