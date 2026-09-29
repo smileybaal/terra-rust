@@ -101,11 +101,11 @@ emits the whole 125 MB assembly regardless of `-t`).
 | rows | 142,357 |
 | columns | 147 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
-| preflight rule coverage | **24 of 30** MDD checks exist (18 implemented, 5 partial, 1 unexercised, 6 absent) - run `sheetty rules` |
+| preflight rule coverage | **26 of 30** MDD checks exist (19 implemented, 6 partial, 1 unexercised, 4 absent) - run `sheetty rules` |
 | rule tests | `tools/test-preflight.ps1` asserts 7 diagnostics fire on a broken fixture and that the real book stays clean |
 | managed evidence (ILSpy) | 1,549 types, 14,052 methods, 28,039 fields, 715 base/interface links |
 | managed dependency edges | 2,212 (1,545 `uses`, 667 `inherits`), derived from C# declarations |
-| strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk |
+| strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 
 ## What Ghidra actually produced here (read this before trusting the sheets)

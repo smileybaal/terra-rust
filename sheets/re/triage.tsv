@@ -12,6 +12,9 @@
 # decoded no code (dec013), so this scores fields and methods per type,
 # which ILSpy measured exactly. ref_conf is 'probable': the counts are
 # certain, the choice of them as a size proxy is a judgement.
+# This sheet is keyed by re/types.id on purpose: one triage annotation
+# per type, so preflight check 13 is exempted via key_alias.
+# key_alias: re/types
 # id_form: compound
 id:string*	reason:string	score:f32	priority:u8	status:string	ref_addr:string	ref_conf:string	evidence:string
 bcrypt.net.bcrypt	fields=16;methods=7	17.17	1	todo	ilspy:ilspy/BCrypt/Net/BCrypt.cs	probable	ILSpy measured fields=16 methods=7; size proxy, because Ghidra size is unusable (dec013)

@@ -6,6 +6,10 @@
 # requires: -
 # owned_by: verifier
 # doctrine: D1,D4,D5
+# key_alias: 02-plan
+# This sheet is the implementation relation for 02-plan, so it shares that
+# sheet's key space by design (MDD 3.4: spec and impl overlap on id). The
+# `key_alias` declaration exempts the pair from preflight check 13.
 # For Mode B a work unit reaches 'done' when its evidence rows exist and the
 # unit has been normalized into domain sheets; 'verified' additionally requires
 # a passing parity trace (MDD 7.7).

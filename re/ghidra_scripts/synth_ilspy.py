@@ -532,6 +532,9 @@ def main() -> int:
             "# decoded no code (dec013), so this scores fields and methods per type,\n"
             "# which ILSpy measured exactly. ref_conf is 'probable': the counts are\n"
             "# certain, the choice of them as a size proxy is a judgement.\n"
+            "# This sheet is keyed by re/types.id on purpose: one triage annotation\n"
+            "# per type, so preflight check 13 is exempted via key_alias.\n"
+            "# key_alias: re/types\n"
             "# id_form: compound"
         ),
     ) + "id:string*\treason:string\tscore:f32\tpriority:u8\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"

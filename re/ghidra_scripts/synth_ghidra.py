@@ -20,6 +20,7 @@ Every row carries ref_addr + ref_conf + evidence (MDD 8.9 / O16).
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -287,14 +288,23 @@ def do_assets() -> int:
         if os.path.isfile(on_disk):
             status = "found"
             size = str(os.path.getsize(on_disk))
+            # A content hash is what makes an asset claim checkable later. Size
+            # alone cannot detect a swapped file of the same length.
+            # NB: do not name this `h` -- `h` already holds the manifest height.
+            hasher = hashlib.sha256()
+            with open(on_disk, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    hasher.update(chunk)
+            digest = hasher.hexdigest()
         else:
             status = "missing"
             # NULL is the explicit "do not default" marker (MDD 5.2). The asset
-            # is not on disk, so its size is genuinely unknown -- an empty cell
-            # would incorrectly imply "inherit the column default".
+            # is not on disk, so its size and hash are genuinely unknown -- an
+            # empty cell would incorrectly imply "inherit the column default".
             size = "NULL"
+            digest = "NULL"
         rows.append([
-            aid, path, size, "NULL", "xnb", status,
+            aid, path, size, digest, "xnb", status,
             "0x%s" % addr.lower(), "certain",
             "embedded Path/Width/Height manifest; dims %sx%s" % (w, h),
         ])

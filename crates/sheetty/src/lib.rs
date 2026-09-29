@@ -87,6 +87,7 @@ pub struct Manifest {
     pub evidence_required: bool,
     pub id_compound: bool,
     pub emit_rust: bool,
+    pub key_alias: Vec<String>,
     pub fields: BTreeMap<String, String>,
 }
 
@@ -217,6 +218,9 @@ fn parse_manifest_line(line: &str, m: &mut Manifest) {
             "evidence" => m.evidence_required = v == "required",
             "id_form" => m.id_compound = v == "compound",
             "emit" => m.emit_rust = v == "rust",
+            "key_alias" => {
+                m.key_alias = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "-").collect()
+            }
             _ => {}
         }
         m.fields.insert(k, v);
@@ -705,6 +709,42 @@ pub fn validate(sheets: &[Sheet], base: &mut Vec<Finding>) {
             "",
             format!("no topological order exists; {} sheet(s) are in cycles: {}", stuck.len(), stuck.join(", ")),
         ));
+    }
+
+    // L0 check 13: the same key must not live in two different sheets by
+    // accident. Some sheets deliberately share a key space (a 1:1 annotation
+    // sheet keyed by its subject's id); those declare `key_alias:` and are
+    // exempt, so the rule fires on mistakes rather than on intended design.
+    let mut owner: BTreeMap<String, (String, usize)> = BTreeMap::new();
+    for s in sheets {
+        let aliases: Vec<&str> = s.manifest.key_alias.iter().map(|a| a.as_str()).collect();
+        for r in &s.rows {
+            let k = s.row_key(r);
+            match owner.get(&k) {
+                Some((prev, _prevline)) => {
+                    let exempt = prev == &s.name
+                        || aliases.contains(&prev.as_str())
+                        || sheets
+                            .iter()
+                            .find(|x| &x.name == prev)
+                            .map(|x| x.manifest.key_alias.iter().any(|a| a == &s.name))
+                            .unwrap_or(false);
+                    if !exempt {
+                        base.push(Finding::warn(
+                            "W-L0-CROSSKEY",
+                            &s.name,
+                            r.line,
+                            &k,
+                            "",
+                            format!("key '{k}' already appears in sheet '{prev}' (check 13); declare `key_alias: {prev}` if that is intended"),
+                        ));
+                    }
+                }
+                None => {
+                    owner.insert(k, (s.name.clone(), r.line));
+                }
+            }
+        }
     }
 }
 
@@ -1326,14 +1366,14 @@ pub const RULES: &[RuleCheck] = &[
     RuleCheck { n: "10", name: "Enum domain",          status: "partial",     emits: "E-L1-VALUE",    note: "checks identifier form only; the declared variant set is not consulted" },
     RuleCheck { n: "11", name: "Empty/NULL, defaults", status: "implemented", emits: "E-L1-EMPTY,E-L1-DEFAULT", note: "empty-in-required fails; NULL is explicit; a declared default must itself parse as the column type" },
     RuleCheck { n: "12", name: "Every FK resolves",    status: "implemented", emits: "E-L2-REF",       note: "" },
-    RuleCheck { n: "13", name: "No duplicate rows across sheets", status: "absent", emits: "",          note: "MDD severity W; not implemented" },
+    RuleCheck { n: "13", name: "No duplicate rows across sheets", status: "implemented", emits: "W-L0-CROSSKEY", note: "sheets that intentionally share a key space declare `key_alias:` and are exempt" },
     RuleCheck { n: "14", name: "No cycles",            status: "implemented", emits: "E-L2-CYCLE",     note: "DFS over manifest requires plus column refs" },
     RuleCheck { n: "15", name: "Topological order exists", status: "implemented", emits: "E-L2-TOPO",   note: "Kahn over manifest requires plus column refs; `sheetty order` prints it" },
     RuleCheck { n: "16", name: "No unimplemented rows", status: "partial",    emits: "L3 overlap",     note: "reported, not gating; --strict gates warnings only" },
     RuleCheck { n: "17", name: "No orphan rows",       status: "partial",     emits: "L3 overlap",     note: "reported, never fails" },
     RuleCheck { n: "18", name: "No divergent rows",    status: "implemented", emits: "L3 overlap",     note: "attribute compare over shared columns" },
     RuleCheck { n: "19", name: "Every asset exists",   status: "partial",     emits: "re/assets status=found|missing", note: "done by the synthesizer at extraction time, not by sheetty" },
-    RuleCheck { n: "20", name: "Asset hash matches baseline", status: "absent", emits: "",              note: "sizes are recorded; hashes are not computed" },
+    RuleCheck { n: "20", name: "Asset hash matches baseline", status: "partial", emits: "re/assets sha256", note: "every present asset now carries a real sha256; drift against a previous run is not yet automated" },
     RuleCheck { n: "21", name: "Kernel allowlist complete", status: "unexercised", emits: "E-L0-KERNEL", note: "implemented both ways; kernel/ is empty so it has never had anything to check" },
     RuleCheck { n: "22", name: "No generated file in tree", status: "implemented", emits: "E-L0-GENERATED", note: "scans for the emitter's banner outside target/ and .git (D6)" },
     RuleCheck { n: "23", name: "No hand edits to generated files", status: "partial", emits: "E-L0-GENERATED", note: "covered indirectly: generated files cannot exist in the tree at all; there is no hash comparison inside OUT_DIR" },
