@@ -1,0 +1,24 @@
+# sheet: 00-doctrine
+# version: 1
+# generator: kv
+# target: docs/doctrine
+# index: by_key
+# requires: -
+# owned_by: architect
+# doctrine: D1,D4,D7,D8
+id:string*	key:string	value:string	notes:string?
+d01	project	terraria-port	-
+d02	mode	B	Mode B: binary only; no official source release exists
+d03	doctrine_version	1.0	MDD 2026-09-29
+d04	emitter_version	1	sheetty v0.1.0
+d05	rust	1.98.1	stable-x86_64-pc-windows-msvc
+d06	bevy	0.19.1	registry crate sources only; vendor junction pending (dec006)
+d07	ghidra	12.1.4	C:/Users/PORTMANTEAU/Desktop/Misc/ghidra_12.1.4_PUBLIC
+d08	ghidra_cli	0.2.2	github.com/akiselev/ghidra-cli; cargo install --path .
+d09	jdk	27	ghidra doctor passed; bridge compiled (dec007)
+d10	ilspy	9.1.0.7988	dotnet tool ilspycmd; runs with DOTNET_ROLL_FORWARD=LatestMajor (dec003)
+d11	target	re/binaries/Terraria.exe	PE32 i386, .NET CLI assembly, XNA/FNA runtime
+d12	target_sha256	960a03bff6050cf7be16dfc1a7b19e10fc2c4f8f835a6a3b135a50dd9e6ba2f3	provenance root: every downstream claim inherits this hash
+d13	legal	see decisions.tsv	do not distribute reverse-engineered artifacts (MDD 8.10)
+d14	determinism	unverified	D9: RNG ground truth not yet captured; blocks parity work
+d15	blast_radius_budget	one sheet module + registry + owning crate	MDD 5.9 success criterion

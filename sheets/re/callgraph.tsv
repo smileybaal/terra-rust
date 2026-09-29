@@ -1,0 +1,11 @@
+# sheet: re/callgraph
+# version: 1
+# generator: callgraph
+# target: sheets/re
+# index: by_edge
+# requires: re/functions
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# Edges. Cycles here are informative, not errors: SCCs are usually subsystems.
+id:string*	from:string	to:string	kind:string	status:string	ref_addr:string	ref_conf:string	evidence:string

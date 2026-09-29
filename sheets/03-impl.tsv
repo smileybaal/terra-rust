@@ -1,0 +1,28 @@
+# sheet: 03-impl
+# version: 1
+# generator: impl
+# target: crates/terraria
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1,D4,D5
+# For Mode B a work unit reaches 'done' when its evidence rows exist and the
+# unit has been normalized into domain sheets; 'verified' additionally requires
+# a passing parity trace (MDD 7.7).
+id:string*	sheet:string	rust_item:string	status:string	ref_src:string	ref_addr:string	ref_conf:string	evidence:string
+core_math	domain/core	-	todo	-	-	-	-
+world_tiles	domain/world	-	todo	-	-	-	-
+world_gen	domain/world	-	todo	-	-	-	-
+npc	domain/npc	-	todo	-	-	-	-
+item	domain/item	-	todo	-	-	-	-
+projectile	domain/projectile	-	todo	-	-	-	-
+player	domain/player	-	todo	-	-	-	-
+crafting	domain/recipe	-	todo	-	-	-	-
+combat	domain/damage	-	todo	-	-	-	-
+net	domain/net	-	todo	-	-	-	-
+render	domain/render	-	todo	-	-	-	-
+audio	domain/audio	-	todo	-	-	-	-
+ui	domain/ui	-	todo	-	-	-	-
+assets	domain/assets	-	todo	-	-	-	-
+time_weather	domain/time	-	todo	-	-	-	-
+world_event	domain/event	-	todo	-	-	-	-

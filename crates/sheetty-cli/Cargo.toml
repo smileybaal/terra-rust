@@ -1,0 +1,13 @@
+[package]
+name = "sheetty-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command line front end for sheetty"
+
+[[bin]]
+name = "sheetty"
+path = "src/main.rs"
+
+[dependencies]
+sheetty = { path = "../sheetty" }

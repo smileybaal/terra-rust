@@ -1,0 +1,13 @@
+# sheet: work
+# version: 1
+# generator: work
+# target: sheets/work.tsv
+# index: by_id
+# requires: 03-impl
+# owned_by: integrator
+# doctrine: D1
+id:string*	sheet:string	row_range:string	role:string	agent:string	state:string	ts:string	evidence:string
+t0001	re/functions	all	extractor	ghidra-agent	open	2026-09-29T22:47Z	ghidra project terraria
+t0002	re/types	all	extractor	ilspy-agent	open	2026-09-29T22:50Z	re/exports/ilspy_entities_*.txt
+t0003	re/methods	all	extractor	ilspy-agent	open	2026-09-29T22:50Z	re/exports/ilspy
+t0004	01-schema	all	architect	architect	open	2026-09-29T22:51Z	schema bootstrap

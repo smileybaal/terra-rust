@@ -1,0 +1,12 @@
+# sheet: kernel
+# version: 1
+# generator: kernel
+# target: kernel
+# index: by_id
+# requires: -
+# owned_by: kernel-author
+# doctrine: D4
+# Hand-written algorithmic code ONLY. Empty means no kernel module exists yet.
+# Preflight (check 21) walks kernel/** and fails on any module not listed here,
+# and on any listed module whose path does not exist.
+id:string*	kind:string	rust_module:string	status:string	tests:string	notes:string?

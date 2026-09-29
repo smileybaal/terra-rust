@@ -1,0 +1,20 @@
+# generated code is never committed (D6)
+/target
+**/target
+
+# Mode B raw material is regenerable; the evidence sheet is the artifact (MDD §4)
+/re/exports/
+/re/ghidra_projects/
+/re/traces/*.tsv
+/re/ctx/*.tsv
+/re/binaries/*.exe
+
+# xlsx is a view, never the store (D7)
+**/*.xlsx
+
+# projected docs
+/docs/generated/*
+!/docs/generated/.gitkeep
+
+# keep the committed trace hashes
+!/re/traces/*.sha256

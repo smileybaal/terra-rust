@@ -1,0 +1,18 @@
+# sheet: decisions
+# version: 1
+# generator: decisions
+# target: docs/decisions
+# index: by_id
+# requires: -
+# owned_by: architect
+# doctrine: D1,D7
+id:string*	decision:string	rationale:string	alternatives:string	reversibility:string	ts:string
+dec001	canonical artifact is plain-text TSV; xlsx is an import view	xlsx is a zip archive: it cannot line-merge under git and diffs as 'binary files differ', which breaks the multi-agent workflow	commit xlsx as the store	medium	2026-09-29
+dec002	Mode B entry (binary only), not Mode A	no official source release of Terraria exists; the only artifact is the shipped assembly	wait for a source leak/release	hard	2026-09-29
+dec003	managed evidence is produced by ILSpy (ilspycmd), not Ghidra	Terraria.exe is a CLI/.NET assembly; Ghidra has no CIL decompiler, so its decompiled output cannot be the game logic. Ghidra still supplies PE, import, resource, string and CLI-metadata-structure evidence.	Ghidra-only (yields metadata and PE facts, not CIL)	medium	2026-09-29
+dec004	trailing empty cells may be omitted; the reader pads to header width	keeps rows clean and diffs minimal; recorded rather than left implicit	require full-width rows	 easy	2026-09-29
+dec005	ref_addr format is per-producer; L2 checks presence, not format	managed rows address by assembly!Type::method plus il offset; native rows use 0x-hex. One format cannot serve both.	force 0x-hex everywhere	 easy	2026-09-29
+dec006	Bevy source is the pinned registry crate only; no vendor junction yet	MDD 7.1 wants an easily locatable Bevy source. Registry crates are the exact compiled code but live under a hash-named path.	create vendor/bevy junction + clone bevyengine/bevy at the tag	 easy	2026-09-29
+dec007	JDK 27 is accepted for Ghidra 12.1.4	ghidra doctor passed and the bridge script compiled under oracle jdk-27, despite Ghidra 12.x documenting JDK 21	install Temurin 21 and pin java_home	 easy	2026-09-29
+dec008	strings containing TAB or newline are excluded from sheets/re/strings.tsv	the canonical TSV form forbids unescaped tabs and newlines; such rows would raise W-L1-QUOTED forever	RFC4180-quote the cells and accept the warning	 easy	2026-09-29
+dec009	01-schema.tsv declares `id_form: compound`; its ids join sheet and column with '.'	a compound primary key needs a separator, and '.' is the conventional one. The L0 charset rule ([a-z0-9_]+) is relaxed to allow '.' only for sheets that declare the exception. This keeps one rule with one recorded gate rather than an implicit carve-out.	use 'sheet__column' double-underscore; or a synthetic opaque id	 easy	2026-09-29

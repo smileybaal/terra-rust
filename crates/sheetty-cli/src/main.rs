@@ -1,0 +1,319 @@
+//! sheetty-cli: `sheetty preflight | overlap | report | view`
+//!
+//! Exit codes: 0 = clean, 1 = errors present (D5: preflight gates the build),
+//! 2 = usage error.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use sheetty::*;
+
+fn usage() -> &'static str {
+    "sheetty <command>
+
+commands:
+  preflight [--sheets DIR] [--layer L0|L1|L2|L3] [--json] [--strict] [--pair A:B]
+  overlap <SPEC> <IMPL> [--key id] [--json]
+  report unimplemented [--spec A] [--impl B] [--rank blast-radius] [--json]
+  view <SHEET> [--cols a,b,c] [--out FILE] [--sheets DIR]
+  schema [--sheets DIR] [--json] [--emit PATH]
+"
+}
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() {
+        eprint!("{}", usage());
+        return ExitCode::from(2);
+    }
+    match args[0].as_str() {
+        "preflight" => cmd_preflight(&args[1..]),
+        "overlap" => cmd_overlap(&args[1..]),
+        "report" => cmd_report(&args[1..]),
+        "view" => cmd_view(&args[1..]),
+        "schema" => cmd_schema(&args[1..]),
+        "-h" | "--help" | "help" => {
+            print!("{}", usage());
+            ExitCode::SUCCESS
+        }
+        other => {
+            eprintln!("unknown command '{other}'\n");
+            eprint!("{}", usage());
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn flag_value(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
+}
+fn has_flag(args: &[String], name: &str) -> bool {
+    args.iter().any(|a| a == name)
+}
+fn sheets_dir(args: &[String]) -> PathBuf {
+    PathBuf::from(flag_value(args, "--sheets").unwrap_or_else(|| "sheets".to_string()))
+}
+
+fn cmd_preflight(args: &[String]) -> ExitCode {
+    let dir = sheets_dir(args);
+    let layer = flag_value(args, "--layer").unwrap_or_default();
+    let json = has_flag(args, "--json");
+    let strict = has_flag(args, "--strict");
+    let (do_l0, do_l1, do_l2, do_l3) = run_layers(&layer);
+
+    let (sheets, mut findings) = load_book(&dir);
+    if sheets.is_empty() {
+        eprintln!("no sheets found under {}", dir.display());
+        return ExitCode::from(1);
+    }
+    let mut pre = Vec::new();
+    if do_l0 || do_l1 || do_l2 {
+        validate(&sheets, &mut pre);
+    } else {
+        validate(&sheets, &mut pre);
+    }
+    // layer filtering
+    pre.retain(|f| {
+        let l = f.code.chars().nth(2);
+        match l {
+            Some('0') => do_l0,
+            Some('1') => do_l1,
+            Some('2') => do_l2,
+            _ => true,
+        }
+    });
+    findings.append(&mut pre);
+
+    let mut overlaps = Vec::new();
+    if do_l3 {
+        let pair = flag_value(args, "--pair");
+        let (a_name, b_name) = match pair.as_deref() {
+            Some(p) => match p.split_once(':') {
+                Some((a, b)) => (a.to_string(), b.to_string()),
+                None => ("02-plan".to_string(), "03-impl".to_string()),
+            },
+            None => ("02-plan".to_string(), "03-impl".to_string()),
+        };
+        if let (Some(a), Some(b)) = (find_sheet(&sheets, &a_name), find_sheet(&sheets, &b_name)) {
+            overlaps.push(overlap(a, b));
+        }
+    }
+
+    let s = summarize(&sheets, &findings);
+    if json {
+        println!("{}", json_report(&sheets, &findings, &overlaps));
+    } else {
+        print!("{}", human_report(&sheets, &findings, &overlaps));
+    }
+
+    let fail = s.errors > 0 || (strict && s.warnings > 0);
+    if fail {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn find_sheet<'a>(sheets: &'a [Sheet], name: &str) -> Option<&'a Sheet> {
+    sheets
+        .iter()
+        .find(|s| s.name == name || s.rel.trim_end_matches(".tsv") == name || s.rel.trim_end_matches(".tsv").replace('/', "-") == name)
+}
+
+fn cmd_overlap(args: &[String]) -> ExitCode {
+    let mut positional = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            i += 2;
+        } else {
+            positional.push(args[i].clone());
+            i += 1;
+        }
+    }
+    if positional.len() < 2 {
+        eprint!("{}", usage());
+        return ExitCode::from(2);
+    }
+    let dir = sheets_dir(args);
+    let json = has_flag(args, "--json");
+    let (sheets, _) = load_book(&dir);
+    let (a, b) = match (find_sheet(&sheets, &positional[0]), find_sheet(&sheets, &positional[1])) {
+        (Some(a), Some(b)) => (a, b),
+        _ => {
+            eprintln!("sheet not found: {}", positional.join(" "));
+            return ExitCode::from(1);
+        }
+    };
+    let o = overlap(a, b);
+    if json {
+        println!("{{\"spec\":\"{}\",\"impl\":\"{}\",\"covered\":{},\"unimplemented\":{},\"orphan\":{},\"divergent\":{}}}",
+            jesc(&o.spec), jesc(&o.imp), o.covered.len(), o.unimplemented.len(), o.orphan.len(), o.divergent.len());
+    } else {
+        let (c, u, or, d) = o.counts();
+        println!("overlap {} x {}  (key: {})", o.spec, o.imp, flag_value(args, "--key").unwrap_or_else(|| "id".into()));
+        println!("  covered        {c}");
+        println!("  unimplemented  {u}");
+        for id in o.unimplemented.iter().take(50) {
+            println!("      - {id}");
+        }
+        println!("  orphan         {or}");
+        for id in o.orphan.iter().take(50) {
+            println!("      + {id}");
+        }
+        println!("  divergent      {d}");
+        for (k, col, a, b) in o.divergent.iter().take(50) {
+            println!("      ~ {k}.{col}: spec='{a}' impl='{b}'");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_report(args: &[String]) -> ExitCode {
+    if args.first().map(|s| s.as_str()) != Some("unimplemented") {
+        eprint!("{}", usage());
+        return ExitCode::from(2);
+    }
+    let dir = sheets_dir(args);
+    let json = has_flag(args, "--json");
+    let spec = flag_value(args, "--spec").unwrap_or_else(|| "02-plan".to_string());
+    let imp = flag_value(args, "--impl").unwrap_or_else(|| "03-impl".to_string());
+    let (sheets, _) = load_book(&dir);
+    let (a, b) = match (find_sheet(&sheets, &spec), find_sheet(&sheets, &imp)) {
+        (Some(a), Some(b)) => (a, b),
+        _ => {
+            eprintln!("sheet not found: {spec} or {imp}");
+            return ExitCode::from(1);
+        }
+    };
+    let o = overlap(a, b);
+    let ranked = rank_blast_radius(&sheets, a, &o.unimplemented);
+    if json {
+        print!("{{\"spec\":\"{}\",\"impl\":\"{}\",\"count\":{},\"work_queue\":[", jesc(&o.spec), jesc(&o.imp), ranked.len());
+        for (i, (id, inbound, prio)) in ranked.iter().enumerate() {
+            if i > 0 {
+                print!(",");
+            }
+            print!("{{\"id\":\"{}\",\"inbound_refs\":{},\"priority\":{}}}", jesc(id), inbound, prio);
+        }
+        println!("]}}");
+    } else {
+        println!("UNIMPLEMENTED  {} ({} rows), ranked by blast radius", o.spec, ranked.len());
+        println!("  {:<24} {:>12} {:>9}", "id", "inbound_refs", "priority");
+        for (id, inbound, prio) in &ranked {
+            println!("  {:<24} {:>12} {:>9}", id, inbound, prio);
+        }
+        if ranked.is_empty() {
+            println!("  (none)");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_view(args: &[String]) -> ExitCode {
+    let mut positional = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            i += 2;
+        } else {
+            positional.push(args[i].clone());
+            i += 1;
+        }
+    }
+    let name = match positional.first() {
+        Some(n) => n.clone(),
+        None => {
+            eprint!("{}", usage());
+            return ExitCode::from(2);
+        }
+    };
+    let dir = sheets_dir(args);
+    let (sheets, _) = load_book(&dir);
+    let s = match find_sheet(&sheets, &name) {
+        Some(s) => s,
+        None => {
+            eprintln!("sheet not found: {name}");
+            return ExitCode::from(1);
+        }
+    };
+    let cols: Vec<String> = match flag_value(args, "--cols") {
+        Some(c) => c.split(',').map(|x| x.trim().to_string()).collect(),
+        None => s.columns.iter().map(|c| c.name.clone()).collect(),
+    };
+    let mut out = String::new();
+    out.push_str(&cols.join("\t"));
+    out.push('\n');
+    for r in &s.rows {
+        let cells: Vec<String> = cols
+            .iter()
+            .map(|c| s.cell(r, c).unwrap_or("").to_string())
+            .collect();
+        out.push_str(&cells.join("\t"));
+        out.push('\n');
+    }
+    match flag_value(args, "--out").map(PathBuf::from) {
+        Some(p) => {
+            if let Err(e) = std::fs::write(&p, out) {
+                eprintln!("cannot write {}: {e}", p.display());
+                return ExitCode::from(1);
+            }
+            eprintln!("wrote {} ({} cols, {} rows)", p.display(), cols.len(), s.rows.len());
+        }
+        None => print!("{out}"),
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_schema(args: &[String]) -> ExitCode {
+    let dir = sheets_dir(args);
+    let json = has_flag(args, "--json");
+    let (sheets, _) = load_book(&dir);
+    if let Some(p) = flag_value(args, "--emit").map(PathBuf::from) {
+        let tsv = schema_tsv(&sheets);
+        if let Err(e) = std::fs::write(&p, tsv) {
+            eprintln!("cannot write {}: {e}", p.display());
+            return ExitCode::from(1);
+        }
+        eprintln!("wrote {} (authoritative schema)", p.display());
+        return ExitCode::SUCCESS;
+    }
+    if json {
+        print!("{{\"sheets\":[");
+        for (i, s) in sheets.iter().enumerate() {
+            if i > 0 {
+                print!(",");
+            }
+            print!("{{\"sheet\":\"{}\",\"columns\":[", jesc(&s.name));
+            for (j, c) in s.columns.iter().enumerate() {
+                if j > 0 {
+                    print!(",");
+                }
+                print!(
+                    "{{\"name\":\"{}\",\"type\":\"{}\",\"optional\":{},\"pk\":{},\"unit\":{},\"ref\":{}}}",
+                    jesc(&c.name),
+                    jesc(&c.ty),
+                    c.optional,
+                    c.pk,
+                    c.unit.as_deref().map(|u| format!("\"{}\"", jesc(u))).unwrap_or_else(|| "null".into()),
+                    c.ref_to.as_ref().map(|(a, b)| format!("\"{}.{}\"", jesc(a), jesc(b))).unwrap_or_else(|| "null".into())
+                );
+            }
+            print!("]}}");
+        }
+        println!("]}}");
+    } else {
+        for s in sheets.iter() {
+            println!("{}  ({} cols, {} rows)", s.name, s.columns.len(), s.rows.len());
+            for c in s.columns.iter() {
+                let refs = c.ref_to.as_ref().map(|(a, b)| format!(" -> {a}.{b}")).unwrap_or_default();
+                let unit = c.unit.as_ref().map(|u| format!(" {u}")).unwrap_or_default();
+                println!("    {:<24} :{}{}{}{}{}", c.name, c.ty, if c.optional { "?" } else { "" }, unit, refs, if c.pk { "  [pk]" } else { "" });
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+#[allow(dead_code)]
+fn _unused(_p: &Path) {}

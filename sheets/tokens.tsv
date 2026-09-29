@@ -1,0 +1,9 @@
+# sheet: tokens
+# version: 1
+# generator: ledger
+# target: sheets/tokens.tsv
+# index: by_id
+# requires: -
+# owned_by: integrator
+# doctrine: D8
+id:string*	role:string	agent:string	input_tokens:u32	output_tokens:u32	cached_tokens:u32	rows_verified:u16	prefix_hash:string	tok_per_strut:string	ts:string

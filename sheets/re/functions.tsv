@@ -1,0 +1,11 @@
+# sheet: re/functions
+# version: 1
+# generator: functions
+# target: sheets/re
+# index: by_id
+# requires: re/sources
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# Native/PE-side function inventory from Ghidra. One row per function.
+id:string*	name:string	addr:string	size:u32	calls:u16	called_by:u16	tags:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string

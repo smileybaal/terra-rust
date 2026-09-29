@@ -1,0 +1,11 @@
+# sheet: re/methods
+# version: 1
+# generator: methods
+# target: sheets/re
+# index: by_id
+# requires: re/types,re/sources
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# Managed method inventory from ILSpy. id is assembly!Type::method#overload.
+id:string*	type:string	name:string	signature:string	kind:string	il_offset:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string

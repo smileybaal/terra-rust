@@ -1,0 +1,11 @@
+# sheet: re/assets
+# version: 1
+# generator: assets
+# target: sheets/re
+# index: by_id
+# requires: re/sources
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# Content directory inventory, cross-referenced with the string/constant tables.
+id:string*	path:string	size:u64	sha256:string	loader:string	status:string	ref_addr:string	ref_conf:string	evidence:string

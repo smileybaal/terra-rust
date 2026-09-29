@@ -1,0 +1,11 @@
+# sheet: re/types
+# version: 1
+# generator: types
+# target: sheets/re
+# index: by_id
+# requires: re/sources
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.
+id:string*	kind:string	namespace:string	name:string	fields:u16	base:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string

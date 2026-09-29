@@ -1,0 +1,12 @@
+# sheet: re/triage
+# version: 1
+# generator: triage
+# target: sheets/re
+# index: by_id
+# requires: re/functions,re/methods
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# Function/method triage. score follows MDD 8.5 (log size, xrefs, string
+# proximity, entry proximity, named symbol, interesting hits, minus thunk-likeness).
+id:string*	reason:string	score:f32	priority:u8	status:string	ref_addr:string	ref_conf:string	evidence:string

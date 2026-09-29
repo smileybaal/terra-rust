@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/sheetty", "crates/sheetty-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+# MDD 5.10: build performance baseline for a data-heavy project.
+# Unoptimised generated code is slow to typecheck and slow to run, so dev is
+# opt-level 1; dependencies are optimised once and cached forever.
+[profile.dev]
+opt-level = 1
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
