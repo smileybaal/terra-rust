@@ -12,3 +12,10 @@ version = "0.1.0"
 dependencies = [
  "sheetty",
 ]
+
+[[package]]
+name = "terraria-demo"
+version = "0.1.0"
+dependencies = [
+ "sheetty",
+]

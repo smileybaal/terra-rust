@@ -86,6 +86,7 @@ pub struct Manifest {
     pub doctrine: String,
     pub evidence_required: bool,
     pub id_compound: bool,
+    pub emit_rust: bool,
     pub fields: BTreeMap<String, String>,
 }
 
@@ -215,6 +216,7 @@ fn parse_manifest_line(line: &str, m: &mut Manifest) {
             "doctrine" => m.doctrine = v.clone(),
             "evidence" => m.evidence_required = v == "required",
             "id_form" => m.id_compound = v == "compound",
+            "emit" => m.emit_rust = v == "rust",
             _ => {}
         }
         m.fields.insert(k, v);
@@ -1333,12 +1335,12 @@ pub const RULES: &[RuleCheck] = &[
     RuleCheck { n: "19", name: "Every asset exists",   status: "partial",     emits: "re/assets status=found|missing", note: "done by the synthesizer at extraction time, not by sheetty" },
     RuleCheck { n: "20", name: "Asset hash matches baseline", status: "absent", emits: "",              note: "sizes are recorded; hashes are not computed" },
     RuleCheck { n: "21", name: "Kernel allowlist complete", status: "unexercised", emits: "E-L0-KERNEL", note: "implemented both ways; kernel/ is empty so it has never had anything to check" },
-    RuleCheck { n: "22", name: "No generated file in tree", status: "absent",  emits: "",               note: "no emitter exists, so there is no banner to grep for" },
-    RuleCheck { n: "23", name: "No hand edits to generated files", status: "absent", emits: "",          note: "depends on 22" },
+    RuleCheck { n: "22", name: "No generated file in tree", status: "implemented", emits: "E-L0-GENERATED", note: "scans for the emitter's banner outside target/ and .git (D6)" },
+    RuleCheck { n: "23", name: "No hand edits to generated files", status: "partial", emits: "E-L0-GENERATED", note: "covered indirectly: generated files cannot exist in the tree at all; there is no hash comparison inside OUT_DIR" },
     RuleCheck { n: "24", name: "Divergence vs evidence (L5)", status: "absent", emits: "",              note: "sheet-vs-producer reconciliation is not implemented" },
     RuleCheck { n: "25", name: "Context packs within budget (L6)", status: "absent", emits: "",         note: "no view/context-pack machinery yet" },
-    RuleCheck { n: "26", name: "Dead columns (L6)",    status: "absent",      emits: "",               note: "cannot run without emitters to consume columns" },
-    RuleCheck { n: "27", name: "Emitter determinism (L7)", status: "absent",  emits: "",               note: "no emitter and no clean-rebuild comparison" },
+    RuleCheck { n: "26", name: "Dead columns (L6)",    status: "absent",      emits: "",               note: "the emitter is generic and consumes every column, so a dead-column rule cannot fire yet" },
+    RuleCheck { n: "27", name: "Emitter determinism (L7)", status: "implemented", emits: "emit --verify-determinism", note: "re-emits into a clean directory and byte-compares; also the per-file content-hash gate" },
     RuleCheck { n: "28", name: "Row count sanity",     status: "absent",      emits: "",               note: "no last-commit comparison" },
     RuleCheck { n: "+",  name: "Mode B evidence on every row (MDD 8.9)", status: "implemented", emits: "E-L2-NOEVIDENCE", note: "applies to sheets whose manifest says evidence: required" },
     RuleCheck { n: "+",  name: "Emitter version agreement", status: "implemented", emits: "E-L0-EMITTER", note: "manifest version vs doctrine emitter_version" },
@@ -1372,4 +1374,334 @@ pub fn rules_report() -> String {
         let _ = writeln!(out, "  {:<3} {:<38} {:<12} {:<24} {}", r.n, r.name, r.status, r.emits, r.note);
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// the emit stage (MDD 5.1, 5.6, 5.9)
+// ---------------------------------------------------------------------------
+//
+// "Code volume is decoupled from token cost. The agent authors rows, not code."
+// This is where that claim is cashed: one strut per row, projected mechanically.
+//
+// Doctrine enforced here:
+//   D2  one row, one strut
+//   D5  emit is impossible to invoke when validate has failed
+//   D6  every generated file carries a banner naming its source sheet
+//   5.9 one file per sheet, content-hash gated, so a no-op write never touches
+//       mtime and incremental compilation survives
+
+pub struct EmitReport {
+    pub sheet: String,
+    pub module: String,
+    pub path: String,
+    pub rows: usize,
+    pub bytes: usize,
+    pub written: bool,
+}
+
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
+    "mut", "pub", "ref", "return", "self", "static", "struct", "super", "trait", "true",
+    "type", "unsafe", "use", "where", "while", "async", "await", "abstract", "become",
+    "box", "do", "final", "macro", "override", "priv", "try", "typeof", "unsized",
+    "virtual", "yield",
+];
+
+/// `type` is a Rust keyword and `type` is a real column in re/methods, so raw
+/// identifiers are not optional here.
+fn field_ident(name: &str) -> String {
+    if RUST_KEYWORDS.contains(&name) {
+        format!("r#{name}")
+    } else {
+        name.to_string()
+    }
+}
+
+/// `02-plan` -> `plan`, `re/types` -> `re_types`. The numeric ordering prefix is
+/// stripped because a Rust module cannot start with a digit.
+pub fn module_name(sheet_name: &str) -> String {
+    let mut s = sheet_name.replace(['/', '-'], "_");
+    if let Some(i) = s.find('_') {
+        if s[..i].chars().all(|c| c.is_ascii_digit()) {
+            s = s[i + 1..].to_string();
+        }
+    } else if s.chars().all(|c| c.is_ascii_digit()) {
+        s = format!("s{s}");
+    }
+    let s: String = s
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+        format!("s_{s}")
+    } else {
+        s
+    }
+}
+
+/// MDD Appendix B: the Rust type a declared sheet type projects to.
+/// Types with no faithful projection yet (enums, refs, assets, lists) fall back
+/// to their identifier as a string, and that fallback is visible rather than
+/// silent because the field type changes in the generated output.
+pub fn rust_type(ty: &str) -> String {
+    match ty {
+        "string" => "&'static str".to_string(),
+        "bool" => "bool".to_string(),
+        "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" => ty.to_string(),
+        "vec2" => "[f32; 2]".to_string(),
+        "vec3" => "[f32; 3]".to_string(),
+        "vec4" => "[f32; 4]".to_string(),
+        _ => "&'static str".to_string(),
+    }
+}
+
+fn rust_literal(ty: &str, v: &str) -> String {
+    let t = rust_type(ty);
+    if t == "&'static str" {
+        return format!("{v:?}");
+    }
+    // an unset cell in a non-string column projects to the type's zero
+    if v.is_empty() || v == "NULL" || v == "-" {
+        return match t.as_str() {
+            "bool" => "false".to_string(),
+            "[f32; 2]" => "[0.0, 0.0]".to_string(),
+            "[f32; 3]" => "[0.0, 0.0, 0.0]".to_string(),
+            "[f32; 4]" => "[0.0, 0.0, 0.0, 0.0]".to_string(),
+            _ => "0".to_string(),
+        };
+    }
+    if v == "1" && t == "bool" {
+        return "true".to_string();
+    }
+    if v == "0" && t == "bool" {
+        return "false".to_string();
+    }
+    if t.starts_with('[') {
+        let parts: Vec<String> = v
+            .split_whitespace()
+            .map(|p| if p.contains('.') { p.to_string() } else { format!("{p}.0") })
+            .collect();
+        return format!("[{}]", parts.join(", "));
+    }
+    if t == "f32" || t == "f64" {
+        return if v.contains('.') || v.contains('e') || v.contains('E') { v.to_string() } else { format!("{v}.0") };
+    }
+    v.to_string()
+}
+
+pub fn emit_sheet_source(sheet: &Sheet) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "// GENERATED BY sheetty v{EMITTER_VERSION} FROM {} - DO NOT EDIT",
+        sheet.name
+    );
+    let _ = writeln!(out, "// source:   sheets/{}", sheet.rel);
+    let _ = writeln!(out, "// rows:     {}", sheet.rows.len());
+    let _ = writeln!(out, "// columns:  {}", sheet.columns.len());
+    let _ = writeln!(out, "//");
+    let _ = writeln!(out, "// Hand edits are lost on the next build (MDD D6). Change the sheet instead.");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "/// One strut per row of the '{}' sheet (MDD D2: one row, one strut).",
+        sheet.name
+    );
+    let _ = writeln!(out, "#[derive(Debug, Clone, Copy, PartialEq)]");
+    let _ = writeln!(out, "pub struct Def {{");
+    for c in &sheet.columns {
+        let _ = writeln!(out, "    pub {}: {},", field_ident(&c.name), rust_type(&c.ty));
+    }
+    let _ = writeln!(out, "}}\n");
+
+    // sorted by primary key so the lookup below is a binary search
+    let pk = sheet.pk_index().unwrap_or(0);
+    let pkname = sheet.columns.get(pk).map(|c| field_ident(&c.name)).unwrap_or_else(|| "id".to_string());
+    let pk_is_str = sheet.columns.get(pk).map(|c| rust_type(&c.ty) == "&'static str").unwrap_or(true);
+    let mut rows: Vec<&Row> = sheet.rows.iter().collect();
+    rows.sort_by(|a, b| {
+        let ka = a.cells.get(pk).map(|s| s.as_str()).unwrap_or("");
+        let kb = b.cells.get(pk).map(|s| s.as_str()).unwrap_or("");
+        ka.cmp(kb)
+    });
+
+    let _ = writeln!(out, "pub const ALL: &[Def] = &[");
+    for r in &rows {
+        let _ = writeln!(out, "    Def {{");
+        for (i, c) in sheet.columns.iter().enumerate() {
+            let v = r.cells.get(i).map(|x| x.as_str()).unwrap_or("");
+            let _ = writeln!(out, "        {}: {},", field_ident(&c.name), rust_literal(&c.ty, v));
+        }
+        let _ = writeln!(out, "    }},");
+    }
+    let _ = writeln!(out, "];\n");
+    let _ = writeln!(out, "pub const COUNT: usize = {};\n", rows.len());
+
+    if pk_is_str {
+        let _ = writeln!(out, "/// Rows are emitted sorted by `{pkname}`, so this is a binary search.");
+        let _ = writeln!(out, "pub fn by_id(id: &str) -> Option<&'static Def> {{");
+        let _ = writeln!(out, "    ALL.binary_search_by(|d| d.{pkname}.cmp(id)).ok().map(|i| &ALL[i])");
+        let _ = writeln!(out, "}}");
+    }
+    out
+}
+
+pub fn emit_registry_source(sheets: &[Sheet]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "// GENERATED BY sheetty v{EMITTER_VERSION} FROM the sheet book - DO NOT EDIT");
+    let _ = writeln!(out, "//");
+    let _ = writeln!(out, "// MDD 5.9: this is the fan-out file, so it depends on every sheet and will");
+    let _ = writeln!(out, "// always rebuild. It therefore carries identifiers and lengths only, never");
+    let _ = writeln!(out, "// data bodies, to keep its recompilation cheap.");
+    let _ = writeln!(out);
+    let _ = writeln!(out, "pub struct SheetInfo {{");
+    let _ = writeln!(out, "    pub name: &'static str,");
+    let _ = writeln!(out, "    /// generated module name, or \"-\" when the sheet is not emitted");
+    let _ = writeln!(out, "    pub module: &'static str,");
+    let _ = writeln!(out, "    pub rows: usize,");
+    let _ = writeln!(out, "    pub columns: usize,");
+    let _ = writeln!(out, "}}\n");
+    let _ = writeln!(out, "pub const SHEETS: &[SheetInfo] = &[");
+    for s in sheets {
+        let m = if s.manifest.emit_rust { module_name(&s.name) } else { "-".to_string() };
+        let _ = writeln!(
+            out,
+            "    SheetInfo {{ name: {:?}, module: {:?}, rows: {}, columns: {} }},",
+            s.name,
+            m,
+            s.rows.len(),
+            s.columns.len()
+        );
+    }
+    let _ = writeln!(out, "];\n");
+    let _ = writeln!(out, "pub const SHEET_COUNT: usize = {};", sheets.len());
+    let _ = writeln!(out, "pub const TOTAL_ROWS: usize = {};\n", sheets.iter().map(|s| s.rows.len()).sum::<usize>());
+    let _ = writeln!(out, "pub fn rows_in(sheet: &str) -> Option<usize> {{");
+    let _ = writeln!(out, "    SHEETS.iter().find(|s| s.name == sheet).map(|s| s.rows)");
+    let _ = writeln!(out, "}}");
+    out
+}
+
+/// Write only when the bytes differ. A no-op write still moves mtime, and cargo
+/// and rustc key incremental work off mtime, so a no-op write is not free
+/// (MDD 5.9 / optimization O2).
+fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool, String> {
+    if let Ok(existing) = fs::read(path) {
+        if existing == bytes {
+            return Ok(false);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(true)
+}
+
+/// Run the whole emit stage. Refuses to emit when preflight has errors (D5).
+pub fn emit_run(sheets_dir: &Path, out_dir: &Path) -> Result<Vec<EmitReport>, String> {
+    let (sheets, mut findings) = load_book(sheets_dir);
+    if sheets.is_empty() {
+        return Err(format!("no sheets found under {}", sheets_dir.display()));
+    }
+    validate(&sheets, &mut findings);
+    let errors: Vec<&Finding> = findings.iter().filter(|f| f.is_error()).collect();
+    if !errors.is_empty() {
+        // D5: "emit must be impossible to invoke when validate has failed".
+        let mut msg = format!("preflight failed with {} error(s); emit is refused (D5)", errors.len());
+        for f in errors.iter().take(5) {
+            msg.push_str(&format!("\n  {} {}:{} {}", f.code, f.sheet, f.line, f.message));
+        }
+        return Err(msg);
+    }
+
+    let mut reports = Vec::new();
+    for s in sheets.iter().filter(|s| s.manifest.emit_rust) {
+        let src = emit_sheet_source(s);
+        let module = module_name(&s.name);
+        let path = out_dir.join("sheets").join(format!("{module}.rs"));
+        let written = write_if_changed(&path, src.as_bytes())?;
+        reports.push(EmitReport {
+            sheet: s.name.clone(),
+            module,
+            path: path.to_string_lossy().replace('\\', "/"),
+            rows: s.rows.len(),
+            bytes: src.len(),
+            written,
+        });
+    }
+
+    let reg = emit_registry_source(&sheets);
+    let rpath = out_dir.join("registry.rs");
+    let written = write_if_changed(&rpath, reg.as_bytes())?;
+    reports.push(EmitReport {
+        sheet: "(registry)".to_string(),
+        module: "registry".to_string(),
+        path: rpath.to_string_lossy().replace('\\', "/"),
+        rows: sheets.len(),
+        bytes: reg.len(),
+        written,
+    });
+
+    Ok(reports)
+}
+
+/// The per-sheet `rerun-if-changed` hints the emitter's own build.rs must print
+/// (MDD 5.9 item 3: "emit nothing global").
+pub fn rerun_hints(sheets_dir: &Path) -> Vec<String> {
+    let mut v = Vec::new();
+    if let Ok(rd) = fs::read_dir(sheets_dir) {
+        let mut stack = vec![sheets_dir.to_path_buf()];
+        let _ = rd;
+        while let Some(dir) = stack.pop() {
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if p.extension().map(|x| x.eq_ignore_ascii_case("tsv")).unwrap_or(false) {
+                        v.push(format!("cargo:rerun-if-changed={}", p.to_string_lossy().replace('\\', "/")));
+                    }
+                }
+            }
+        }
+    }
+    v.sort();
+    v
+}
+
+/// L0 check 22: no generated file may be committed outside the build directory.
+/// The banner is the marker.
+pub fn check_no_generated_in_tree(root: &Path, out_dir: &Path) -> Vec<Finding> {
+    let mut found = Vec::new();
+    let banner = format!("GENERATED BY sheetty v{EMITTER_VERSION}");
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if dir.starts_with(out_dir) || dir.file_name().map(|n| n == "target" || n == ".git").unwrap_or(false) {
+            continue;
+        }
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().map(|x| x == "rs").unwrap_or(false) {
+                    if let Ok(t) = fs::read_to_string(&p) {
+                        if t.contains(&banner) {
+                            found.push(Finding::err(
+                                "E-L0-GENERATED",
+                                &p.to_string_lossy().replace('\\', "/"),
+                                0,
+                                "",
+                                "",
+                                "generated file found in the working tree; generated code is never committed (D6)",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found
 }

@@ -496,7 +496,7 @@ def main() -> int:
 
     theader = manifest(
         "re/types", "types", "sheets/re", "re/sources", "D1",
-        extra="# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.\n# Type ids are dotted namespace paths, so the compound-key exception is declared.\n# id_form: compound",
+        extra="# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.\n# Type ids are dotted namespace paths, so the compound-key exception is declared.\n# emit: rust\n# id_form: compound",
     ) + "id:string*\tkind:string\tnamespace:string\tname:string\tfields:u16\tbase:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
 
     mheader = manifest(

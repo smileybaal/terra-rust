@@ -6,6 +6,7 @@
 # requires: -
 # owned_by: architect
 # doctrine: D1,D2,D4
+# emit: rust
 id:string*	kind:string	sheet:string	target:string	priority:u8	status:string	notes:string?
 core_math	subsystem	domain/core	crate::core::math	1	todo	Vector2/Rectangle/Utils ports
 world_tiles	subsystem	domain/world	crate::world::tiles	1	todo	tile grid, framing, liquid, wiring

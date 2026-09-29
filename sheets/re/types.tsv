@@ -9,6 +9,7 @@
 # evidence: required
 # Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.
 # Type ids are dotted namespace paths, so the compound-key exception is declared.
+# emit: rust
 # id_form: compound
 id:string*	kind:string	namespace:string	name:string	fields:u16	base:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
 bcrypt.net.bcrypt	class	BCrypt.Net	BCrypt	16	-	todo	ilspy/BCrypt/Net/BCrypt.cs	ilspy:ilspy/BCrypt/Net/BCrypt.cs	certain	ilspycmd ilspy/BCrypt/Net/BCrypt.cs

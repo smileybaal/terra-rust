@@ -19,6 +19,7 @@ commands:
   schema [--sheets DIR] [--json] [--emit PATH]
   rules   print which MDD preflight checks this engine implements
   order   print a topological order of the sheets (dependency order)
+  emit    project the sheets marked `# emit: rust` into $OUT_DIR (--out DIR)
 "
 }
 
@@ -51,6 +52,58 @@ fn main() -> ExitCode {
                 }
                 Err(stuck) => {
                     eprintln!("NO topological order: {} sheet(s) in cycles: {}", stuck.len(), stuck.join(", "));
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "emit" => {
+            let dir = sheets_dir(&args[1..]);
+            let out = PathBuf::from(flag_value(&args[1..], "--out").unwrap_or_else(|| "target/generated".to_string()));
+            match emit_run(&dir, &out) {
+                Ok(reports) => {
+                    let written = reports.iter().filter(|r| r.written).count();
+                    println!("EMIT  {} file(s), {} written, {} unchanged (content-hash gated)", reports.len(), written, reports.len() - written);
+                    for r in &reports {
+                        println!(
+                            "  {:<14} {:>7} rows {:>10} bytes  {}",
+                            r.module,
+                            r.rows,
+                            r.bytes,
+                            if r.written { "written" } else { "unchanged" }
+                        );
+                        println!("                 {}", r.path);
+                    }
+                    if has_flag(&args[1..], "--hints") {
+                        for h in rerun_hints(&dir) {
+                            println!("{h}");
+                        }
+                    }
+                    if has_flag(&args[1..], "--verify-determinism") {
+                        // MDD L7: re-running the emitter from a clean OUT_DIR must
+                        // produce byte-identical output.
+                        let tmp = out.join(".determinism-check");
+                        let _ = std::fs::remove_dir_all(&tmp);
+                        match emit_run(&dir, &tmp) {
+                            Ok(_) => {
+                                let diff = compare_trees(&out.join("sheets"), &tmp.join("sheets"));
+                                if diff == 0 {
+                                    println!("DETERMINISM  clean re-emit is byte-identical (0 differing files)");
+                                } else {
+                                    println!("DETERMINISM  FAILED: {diff} differing file(s)");
+                                }
+                                let _ = std::fs::remove_dir_all(&tmp);
+                                return if diff == 0 { ExitCode::SUCCESS } else { ExitCode::from(1) };
+                            }
+                            Err(e) => {
+                                eprintln!("determinism re-emit failed: {e}");
+                                return ExitCode::from(1);
+                            }
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("EMIT REFUSED\n{e}");
                     ExitCode::from(1)
                 }
             }
@@ -89,11 +142,16 @@ fn cmd_preflight(args: &[String]) -> ExitCode {
         eprintln!("no sheets found under {}", dir.display());
         return ExitCode::from(1);
     }
+    // D5: preflight gates everything, so this runs unconditionally.
     let mut pre = Vec::new();
-    if do_l0 || do_l1 || do_l2 {
-        validate(&sheets, &mut pre);
-    } else {
-        validate(&sheets, &mut pre);
+    validate(&sheets, &mut pre);
+
+    // L0 check 22: no generated file may sit in the working tree (D6). The
+    // banner written by the emitter is the marker.
+    if do_l0 {
+        if let Some(root) = dir.parent() {
+            pre.extend(check_no_generated_in_tree(root, &root.join("target")));
+        }
     }
     // layer filtering
     pre.retain(|f| {
@@ -340,3 +398,27 @@ fn cmd_schema(args: &[String]) -> ExitCode {
 
 #[allow(dead_code)]
 fn _unused(_p: &Path) {}
+
+/// Count files present in `a` or `b` whose bytes differ. Missing files count as
+/// a difference, which is what makes this a real determinism check rather than a
+/// comparison of two runs that both happened to write nothing.
+fn compare_trees(a: &Path, b: &Path) -> usize {
+    let mut names: Vec<String> = Vec::new();
+    for d in [a, b] {
+        if let Ok(rd) = std::fs::read_dir(d) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+        }
+    }
+    let mut diff = 0;
+    for n in names {
+        if std::fs::read(a.join(&n)).ok() != std::fs::read(b.join(&n)).ok() {
+            diff += 1;
+        }
+    }
+    diff
+}
