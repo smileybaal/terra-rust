@@ -101,6 +101,8 @@ cargo run -p sheetty-cli -- view re/triage --cols id,score,priority,ref_addr
 cargo run -p sheetty-cli -- schema            # list declarations
 cargo run -p sheetty-cli -- order             # dependency order (Kahn)
 cargo run -p sheetty-cli -- rules             # which MDD checks exist, and which do not
+cargo run -p sheetty-cli -- pack v_types      # context pack + budget check (L6)
+cargo run -p sheetty-cli -- pack v_methods --rows 1..900 --out re/ctx/pack.txt
 cargo run -p sheetty-cli -- schema --emit sheets/01-schema.tsv   # bootstrap only
 ```
 
@@ -125,6 +127,7 @@ not a verified rule (MDD: "a rule that never fires may be checking nothing").
 
 **`schema --emit` is a bootstrap tool, not a routine command.** It generates
 `01-schema.tsv` from the current headers. Once committed, the schema is the
-truth and any header divergence is `E-SCHEMA-DRIFT`. Re-running `--emit` after
-editing headers silently makes the drift legitimate, so only the Architect role
-should run it, and every run should be a reviewed commit.
+truth and any header divergence is `E-SCHEMA-DRIFT`. The `view` and `notes`
+columns are preserved across regeneration, because they are schema-only curation
+that does not exist in the sheet headers - without that, re-bootstrapping would
+silently destroy every view assignment.

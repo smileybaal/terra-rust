@@ -680,6 +680,9 @@ pub fn validate(sheets: &[Sheet], base: &mut Vec<Finding>) {
     // unit consistency across sheets (L1, check 9)
     check_units(sheets, base);
 
+    // context packs must fit their declared budgets (L6, check 25)
+    check_budgets(sheets, base);
+
     // declared defaults must themselves be valid values for their column (L1,
     // check 11). Once per column, not once per row.
     for s in sheets {
@@ -844,6 +847,194 @@ pub fn topo_order(sheets: &[Sheet]) -> Result<Vec<String>, Vec<String>> {
     }
 }
 
+/// FNV-1a 64. Used for the prefix hash. Any stable hash works here; what matters
+/// is that the identity of the cached prefix is checkable and recorded (MDD
+/// 11.2), so a silent change to it is detectable rather than merely expensive.
+pub fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Rough token estimate for a byte count. ~4 bytes/token is the usual heuristic
+/// for tab-separated ASCII; it is an estimate and the report says so, because a
+/// budget enforced by a fabricated precise number would be worse than no budget.
+fn est_tokens(bytes: usize) -> usize {
+    bytes.div_ceil(4)
+}
+
+pub struct PackReport {
+    pub view: String,
+    pub sheet: String,
+    pub columns: Vec<String>,
+    pub window: String,
+    pub window_rows: usize,
+    pub total_rows: usize,
+    pub body_bytes: usize,
+    pub body_tokens: usize,
+    pub prefix_bytes: usize,
+    pub prefix_tokens: usize,
+    pub budget: usize,
+    pub prefix_hash: String,
+    pub over_budget: bool,
+}
+
+/// Parse a row window: `*` for everything, or `A..B` inclusive and 1-based.
+/// Returns a half-open range clamped to the sheet.
+pub fn parse_window(spec: &str, total: usize) -> Result<(usize, usize), String> {
+    let s = spec.trim();
+    if s.is_empty() || s == "*" {
+        return Ok((0, total));
+    }
+    let (a, b) = s
+        .split_once("..")
+        .ok_or_else(|| format!("row window '{s}' must be '*' or 'A..B'"))?;
+    let lo: usize = a.trim().parse().map_err(|_| format!("row window '{s}': '{a}' is not a number"))?;
+    let hi: usize = b.trim().parse().map_err(|_| format!("row window '{s}': '{b}' is not a number"))?;
+    if lo == 0 || hi < lo {
+        return Err(format!("row window '{s}' is not a valid 1-based inclusive range"));
+    }
+    let start = (lo - 1).min(total);
+    let end = hi.min(total);
+    Ok((start, end.max(start)))
+}
+
+pub fn build_pack(sheets: &[Sheet], view_name: &str) -> Result<(String, PackReport), String> {
+    build_pack_opt(sheets, view_name, None)
+}
+
+/// `rows_override` lets a caller ask for a different window than the declared one
+/// (`sheetty pack v_methods --rows 901..1800`), which is the practical way to walk
+/// a sheet too large to load at once.
+pub fn build_pack_opt(sheets: &[Sheet], view_name: &str, rows_override: Option<&str>) -> Result<(String, PackReport), String> {
+    let views = sheets
+        .iter()
+        .find(|s| s.name == "views")
+        .ok_or_else(|| "no views sheet: declare views in sheets/views.tsv (MDD 11.3)".to_string())?;
+    let vrow = views
+        .rows
+        .iter()
+        .find(|r| views.row_key(r) == view_name)
+        .ok_or_else(|| format!("view '{view_name}' is not declared in sheets/views.tsv"))?;
+
+    let sheet_name = views.cell(vrow, "sheet").unwrap_or("").to_string();
+    let cols_spec = views.cell(vrow, "columns").unwrap_or("*").to_string();
+    let budget: usize = views.cell(vrow, "token_budget").and_then(|v| v.parse().ok()).unwrap_or(0);
+
+    let sheet = sheets
+        .iter()
+        .find(|s| s.name == sheet_name)
+        .ok_or_else(|| format!("view '{view_name}' names sheet '{sheet_name}', which is not in the book"))?;
+
+    let cols: Vec<String> = if cols_spec.trim() == "*" {
+        sheet.columns.iter().map(|c| c.name.clone()).collect()
+    } else {
+        cols_spec.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect()
+    };
+    for c in &cols {
+        if sheet.col_index(c).is_none() {
+            return Err(format!("view '{view_name}' names column '{c}', which '{sheet_name}' does not declare"));
+        }
+    }
+
+    // [1] + [2] the stable prefix
+    let mut prefix = String::new();
+    if let Some(d) = sheets.iter().find(|s| s.name == "00-doctrine") {
+        prefix.push_str("# [1] DOCTRINE\n");
+        for r in &d.rows {
+            let _ = writeln!(prefix, "{}", r.cells.join("\t"));
+        }
+    }
+    prefix.push_str("# [2] SCHEMA\n");
+    let _ = writeln!(prefix, "{}", cols.join("\t"));
+    for c in &cols {
+        let ci = sheet.col_index(c).unwrap();
+        let col = &sheet.columns[ci];
+        let _ = writeln!(
+            prefix,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            c,
+            col.ty,
+            col.unit.clone().unwrap_or_else(|| "-".into()),
+            if col.optional { "yes" } else { "no" },
+            col.ref_to.as_ref().map(|(a, b)| format!("{a}.{b}")).unwrap_or_else(|| "-".into()),
+            col.default.clone().unwrap_or_else(|| "-".into()),
+            col.flags
+        );
+    }
+
+    // [3] the volatile part
+    let window_spec = rows_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| views.cell(vrow, "row_window").unwrap_or("*").to_string());
+    let (lo, hi) = parse_window(&window_spec, sheet.rows.len())?;
+
+    let mut body = String::new();
+    body.push_str("# [3] TARGET ROWS\n");
+    let _ = writeln!(body, "{}", cols.join("\t"));
+    for r in &sheet.rows[lo..hi] {
+        let cells: Vec<String> = cols
+            .iter()
+            .map(|c| sheet.cell(r, c).unwrap_or("").to_string())
+            .collect();
+        let _ = writeln!(body, "{}", cells.join("\t"));
+    }
+
+    let prefix_bytes = prefix.len();
+    let body_bytes = body.len();
+    let body_tokens = est_tokens(body_bytes);
+    let hash = fnv1a64(prefix.as_bytes());
+    let report = PackReport {
+        view: view_name.to_string(),
+        sheet: sheet_name,
+        columns: cols.clone(),
+        window: window_spec,
+        window_rows: hi - lo,
+        total_rows: sheet.rows.len(),
+        body_bytes,
+        body_tokens,
+        prefix_bytes,
+        prefix_tokens: est_tokens(prefix_bytes),
+        budget,
+        prefix_hash: format!("{hash:016x}"),
+        over_budget: budget > 0 && body_tokens > budget,
+    };
+
+    let full = format!("{prefix}{body}");
+    Ok((full, report))
+}
+
+/// L6 check 25: every declared view must fit its token budget.
+pub fn check_budgets(sheets: &[Sheet], out: &mut Vec<Finding>) {
+    let views = match sheets.iter().find(|s| s.name == "views") {
+        Some(v) => v,
+        None => return,
+    };
+    for r in &views.rows {
+        let name = views.row_key(r);
+        match build_pack(sheets, &name) {
+            Ok((_txt, rep)) => {
+                if rep.over_budget {
+                    out.push(Finding::err(
+                        "E-L6-BUDGET",
+                        "views",
+                        r.line,
+                        &name,
+                        "token_budget",
+                        format!(
+                            "view '{name}' projects {} of {} rows (window '{}') to ~{} tokens, over its budget of {} (MDD 11.3: narrow the view, window the rows, or raise the budget deliberately)",
+                            rep.window_rows, rep.total_rows, rep.window, rep.body_tokens, rep.budget
+                        ),
+                    ));
+                }
+            }
+            Err(e) => out.push(Finding::warn("W-L6-VIEW", "views", r.line, &name, "", e)),
+        }
+    }
+}
 /// L0 check 5: the data-sheet header row is a courtesy; the authoritative
 /// declaration is `01-schema.tsv`. Two copies that can drift is how projects
 /// rot, so drift is a hard error rather than a warning (MDD 5.3).
@@ -911,12 +1102,29 @@ pub fn drift_check(sheets: &[Sheet], out: &mut Vec<Finding>) {
     }
 }
 
-/// Emit the authoritative `01-schema.tsv` from the current headers. Run once to
-/// bootstrap; from then on the committed file is the truth and drift is an error.
+/// Emit the authoritative `01-schema.tsv`. The `view` and `notes` columns are
+/// schema-only curation that does NOT live in the sheet headers, so an existing
+/// file's values are preserved rather than reset. Without that, re-bootstrapping
+/// would silently destroy every view assignment, which is exactly the kind of
+/// quiet loss the method exists to prevent.
 pub fn schema_tsv(sheets: &[Sheet]) -> String {
+    let mut curated: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
+    if let Some(e) = sheets.iter().find(|s| s.name == "01-schema" || s.rel.ends_with("01-schema.tsv")) {
+        for r in &e.rows {
+            let sh = e.cell(r, "sheet").unwrap_or("").to_string();
+            let col = e.cell(r, "column").unwrap_or("").to_string();
+            if sh.is_empty() || col.is_empty() {
+                continue;
+            }
+            let vw = e.cell(r, "view").unwrap_or("v_full").to_string();
+            let nt = e.cell(r, "notes").unwrap_or("-").to_string();
+            curated.insert((sh, col), (vw, nt));
+        }
+    }
+
     let mut out = String::new();
     out.push_str("# sheet: 01-schema\n# version: 1\n# generator: schema\n# target: sheets/01-schema.tsv\n# index: by_sheet_col\n# requires: -\n# owned_by: architect\n# doctrine: D1,D3\n# id_form: compound\n");
-    out.push_str("# Authoritative column declarations. The header row of each data sheet is a\n# courtesy; preflight compares the two and fails on drift (E-SCHEMA-DRIFT).\n");
+    out.push_str("# Authoritative column declarations. The header row of each data sheet is a\n# courtesy; preflight compares the two and fails on drift (E-SCHEMA-DRIFT).\n# The view and notes columns are curation and survive regeneration.\n");
     out.push_str("id:string*\tsheet:string\tcolumn:string\ttype:string\tunit:string\toptional:string\tref:string\tdefault:string\tview:string\tnotes:string?\n");
     for s in sheets {
         if s.name == "01-schema" {
@@ -929,7 +1137,11 @@ pub fn schema_tsv(sheets: &[Sheet]) -> String {
             let opt = if c.optional { "yes" } else { "no" };
             let refv = c.ref_to.as_ref().map(|(a, b)| format!("{a}.{b}")).unwrap_or_else(|| "-".into());
             let def = c.default.clone().unwrap_or_else(|| "-".into());
-            out.push_str(&format!("{id}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tv_full\t-\n", s.name, c.name, c.ty, unit, opt, refv, def));
+            let (view, notes) = curated
+                .get(&(s.name.clone(), c.name.clone()))
+                .cloned()
+                .unwrap_or_else(|| ("v_full".to_string(), "-".to_string()));
+            out.push_str(&format!("{id}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{view}\t{notes}\n", s.name, c.name, c.ty, unit, opt, refv, def));
         }
     }
     out
@@ -1230,6 +1442,29 @@ pub fn human_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]
         }
     }
 
+    // Findings outside L0-L3 (L4-L7 rules such as E-L6-BUDGET) must still be
+    // visible. A finding that counts toward the total but appears in no group is
+    // worse than useless: it makes the report fail without saying why.
+    let mut others: Vec<&Finding> = findings
+        .iter()
+        .filter(|f| {
+            let rest = f.code.get(2..).unwrap_or("");
+            !["L0", "L1", "L2", "L3"].iter().any(|l| rest.starts_with(l))
+        })
+        .collect();
+    if !others.is_empty() {
+        others.sort_by(|a, b| a.code.cmp(&b.code));
+        let _ = writeln!(out, "  L4-L7 other .............. {} finding(s)", others.len());
+        for f in others.iter().take(12) {
+            let sev = if f.is_error() { "E" } else { "W" };
+            let _ = writeln!(out, "      {sev} {}", f.code);
+            let _ = writeln!(out, "        {}:{}  {}{}{}", f.sheet, f.line, f.col, if f.col.is_empty() { "" } else { " " }, f.message);
+        }
+        if others.len() > 12 {
+            let _ = writeln!(out, "      ... +{} more", others.len() - 12);
+        }
+    }
+
     for o in overlaps {
         let (c, u, or, d) = o.counts();
         let _ = writeln!(out);
@@ -1378,7 +1613,7 @@ pub const RULES: &[RuleCheck] = &[
     RuleCheck { n: "22", name: "No generated file in tree", status: "implemented", emits: "E-L0-GENERATED", note: "scans for the emitter's banner outside target/ and .git (D6)" },
     RuleCheck { n: "23", name: "No hand edits to generated files", status: "partial", emits: "E-L0-GENERATED", note: "covered indirectly: generated files cannot exist in the tree at all; there is no hash comparison inside OUT_DIR" },
     RuleCheck { n: "24", name: "Divergence vs evidence (L5)", status: "absent", emits: "",              note: "sheet-vs-producer reconciliation is not implemented" },
-    RuleCheck { n: "25", name: "Context packs within budget (L6)", status: "absent", emits: "",         note: "no view/context-pack machinery yet" },
+    RuleCheck { n: "25", name: "Context packs within budget (L6)", status: "implemented", emits: "E-L6-BUDGET", note: "every view in sheets/views.tsv is assembled and measured on every preflight" },
     RuleCheck { n: "26", name: "Dead columns (L6)",    status: "absent",      emits: "",               note: "the emitter is generic and consumes every column, so a dead-column rule cannot fire yet" },
     RuleCheck { n: "27", name: "Emitter determinism (L7)", status: "implemented", emits: "emit --verify-determinism", note: "re-emits into a clean directory and byte-compares; also the per-file content-hash gate" },
     RuleCheck { n: "28", name: "Row count sanity",     status: "absent",      emits: "",               note: "no last-commit comparison" },

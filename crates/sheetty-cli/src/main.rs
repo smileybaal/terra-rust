@@ -20,6 +20,7 @@ commands:
   rules   print which MDD preflight checks this engine implements
   order   print a topological order of the sheets (dependency order)
   emit    project the sheets marked `# emit: rust` into $OUT_DIR (--out DIR)
+  pack    assemble a named view into a context pack and check its budget
 "
 }
 
@@ -52,6 +53,67 @@ fn main() -> ExitCode {
                 }
                 Err(stuck) => {
                     eprintln!("NO topological order: {} sheet(s) in cycles: {}", stuck.len(), stuck.join(", "));
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "pack" => {
+            // args already excludes argv[0]; args[0] is the command itself.
+            let rest: Vec<String> = args[1..].to_vec();
+            let mut positional = Vec::new();
+            let mut i = 0;
+            while i < rest.len() {
+                if rest[i].starts_with("--") {
+                    i += 2;
+                } else {
+                    positional.push(rest[i].clone());
+                    i += 1;
+                }
+            }
+            let view = match positional.first() {
+                Some(v) => v.clone(),
+                None => {
+                    eprint!("{}", usage());
+                    return ExitCode::from(2);
+                }
+            };
+            let dir = sheets_dir(&rest);
+            let (sheets, _) = load_book(&dir);
+            let rows_override = flag_value(&rest, "--rows");
+            match build_pack_opt(&sheets, &view, rows_override.as_deref()) {
+                Ok((text, r)) => {
+                    if has_flag(&rest, "--json") {
+                        println!(
+                            "{{\"view\":\"{}\",\"sheet\":\"{}\",\"rows\":{},\"total_rows\":{},\"window\":\"{}\",\"columns\":{},\"body_tokens_est\":{},\"prefix_tokens_est\":{},\"budget\":{},\"prefix_hash\":\"{}\",\"over_budget\":{}}}",
+                            jesc(&r.view), jesc(&r.sheet), r.window_rows, r.total_rows, jesc(&r.window), r.columns.len(),
+                            r.body_tokens, r.prefix_tokens, r.budget, r.prefix_hash, r.over_budget
+                        );
+                    } else {
+                        println!("PACK  {} (sheet {})", r.view, r.sheet);
+                        println!("  columns        {}", r.columns.len());
+                        println!("  window         '{}' -> {} of {} rows", r.window, r.window_rows, r.total_rows);
+                        println!("  body           ~{} tokens est ({} bytes)", r.body_tokens, r.body_bytes);
+                        println!("  stable prefix  ~{} tokens est ({} bytes)", r.prefix_tokens, r.prefix_bytes);
+                        println!("  prefix hash    {}   <- record this; if it changes the cache is cold (MDD 11.2)", r.prefix_hash);
+                        println!("  budget         {}", if r.budget == 0 { "unbounded (v_full)".to_string() } else { r.budget.to_string() });
+                        if r.budget > 0 {
+                            println!("  status         {}", if r.over_budget { "OVER BUDGET" } else { "within budget" });
+                        }
+                    }
+                    if let Some(p) = flag_value(&rest, "--out").map(PathBuf::from) {
+                        if let Err(e) = std::fs::write(&p, text) {
+                            eprintln!("cannot write {}: {e}", p.display());
+                            return ExitCode::from(1);
+                        }
+                        eprintln!("wrote {}", p.display());
+                    }
+                    if has_flag(&rest, "--check") && r.over_budget {
+                        return ExitCode::from(1);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("pack failed: {e}");
                     ExitCode::from(1)
                 }
             }

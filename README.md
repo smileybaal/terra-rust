@@ -64,6 +64,8 @@ cargo run -p sheetty-cli -- overlap 02-plan 03-impl --key id
 cargo run -p sheetty-cli -- order          # dependency order over the sheets
 cargo run -p sheetty-cli -- rules          # which MDD checks this engine enforces
 cargo run -p sheetty-cli -- emit --out target/generated --verify-determinism
+cargo run -p sheetty-cli -- pack v_types                 # assemble a view, check its budget
+cargo run -p sheetty-cli -- pack v_methods --rows 1..900 # ad-hoc row window
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 powershell -File tools\test-preflight.ps1  # prove the rules actually fire
 ```
@@ -101,7 +103,7 @@ emits the whole 125 MB assembly regardless of `-t`).
 | rows | 142,357 |
 | columns | 147 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
-| preflight rule coverage | **26 of 30** MDD checks exist (19 implemented, 6 partial, 1 unexercised, 4 absent) - run `sheetty rules` |
+| preflight rule coverage | **27 of 30** MDD checks exist (20 implemented, 6 partial, 1 unexercised, 3 absent) - run `sheetty rules` |
 | rule tests | `tools/test-preflight.ps1` asserts 7 diagnostics fire on a broken fixture and that the real book stays clean |
 | managed evidence (ILSpy) | 1,549 types, 14,052 methods, 28,039 fields, 715 base/interface links |
 | managed dependency edges | 2,212 (1,545 `uses`, 667 `inherits`), derived from C# declarations |
@@ -184,6 +186,33 @@ The doctrine this exercises, and how it was verified rather than asserted:
 | 5.9 one module per sheet | separate `plan.rs` / `re_types.rs`, plus a counts-only `registry.rs` |
 | 5.9 hash-gated writes | second `emit` run reports `0 written, 3 unchanged` |
 | L7 determinism | `emit --verify-determinism` byte-compares a clean re-emit: 0 differing files |
+
+## Context packs and views (why the evidence sheets are windowed)
+
+`sheetty pack` assembles a declared view into a context pack: doctrine, then the
+view's schema, then the projected rows, with a stable prefix hash recorded. The
+first measurement answered the MDD's own open question Q6 ("how large can a sheet
+get before it stops being a good context unit?") with a number:
+
+| view | rows | est. tokens |
+|---|---|---|
+| `re/methods` unwindowed | 14,052 | **~379,526** |
+| `re/strings` unwindowed | 21,081 | ~269,180 |
+| `re/functions` unwindowed | 18,300 | ~267,598 |
+| `re/assets` unwindowed | 15,135 | ~180,828 |
+
+A whole evidence sheet is 1.9x a 200k context window on its own, so it is not a
+usable context unit. The MDD's prescribed fix is a **row window**, not a smaller
+sheet, "because splitting the sheet would break the key space". `sheets/views.tsv`
+therefore declares both a column projection and a row window per view:
+
+```
+v_types   re/types   id,kind,namespace,name,fields,base   1..830   25000
+```
+
+Windows are sized to fit the budget, and the budget is enforced on every
+preflight as `E-L6-BUDGET` - including on ad-hoc `--rows` overrides, so the check
+constrains real usage rather than nodding at a pre-blessed number.
 
 ## Legal (MDD §8.10)
 

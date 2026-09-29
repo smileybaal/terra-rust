@@ -9,6 +9,7 @@
 # id_form: compound
 # Authoritative column declarations. The header row of each data sheet is a
 # courtesy; preflight compares the two and fails on drift (E-SCHEMA-DRIFT).
+# The view and notes columns are curation and survive regeneration.
 id:string*	sheet:string	column:string	type:string	unit:string	optional:string	ref:string	default:string	view:string	notes:string?
 00_doctrine.id	00-doctrine	id	string	-	no	-	-	v_full	-
 00_doctrine.key	00-doctrine	key	string	-	no	-	-	v_full	-
@@ -139,6 +140,13 @@ tokens.rows_verified	tokens	rows_verified	u16	-	no	-	-	v_full	-
 tokens.prefix_hash	tokens	prefix_hash	string	-	no	-	-	v_full	-
 tokens.tok_per_strut	tokens	tok_per_strut	string	-	no	-	-	v_full	-
 tokens.ts	tokens	ts	string	-	no	-	-	v_full	-
+views.id	views	id	string	-	no	-	-	v_full	-
+views.sheet	views	sheet	string	-	no	-	-	v_full	-
+views.columns	views	columns	string	-	no	-	-	v_full	-
+views.row_window	views	row_window	string	-	no	-	-	v_full	-
+views.token_budget	views	token_budget	u32	-	no	-	-	v_full	-
+views.used_by	views	used_by	string	-	no	-	-	v_full	-
+views.status	views	status	string	-	no	-	-	v_full	-
 work.id	work	id	string	-	no	-	-	v_full	-
 work.sheet	work	sheet	string	-	no	-	-	v_full	-
 work.row_range	work	row_range	string	-	no	-	-	v_full	-

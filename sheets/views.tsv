@@ -1,0 +1,37 @@
+# sheet: views
+# version: 1
+# generator: views
+# target: sheets/views.tsv
+# index: by_id
+# requires: 01-schema
+# owned_by: architect
+# doctrine: D1,D8
+# Named column-projection views (MDD 11.3) with row windows.
+#
+# Measured on this book (sheetty pack, 2026-09-29): the evidence sheets are far
+# larger than any single context window. Unwindowed they cost, in estimated
+# tokens:
+#
+#   re/methods   14,052 rows  ~379,526 tok    <- 1.9x a 200k window on its own
+#   re/strings   21,081 rows  ~269,180 tok
+#   re/functions 18,300 rows  ~267,598 tok
+#   re/assets    15,135 rows  ~180,828 tok
+#   re/types      1,549 rows   ~40,958 tok
+#   re/triage     1,549 rows   ~19,960 tok
+#
+# So a whole evidence sheet is not a usable context unit, which is MDD open
+# question Q6. The MDD's prescribed fix is a row window rather than a smaller
+# sheet, "because splitting the sheet would break the key space". That is what
+# `row_window` is: `*` for all rows, or `A..B` inclusive, 1-based.
+#
+# A budget is what I am willing to spend; a window is what makes that possible.
+id:string*	sheet:string	columns:string	row_window:string	token_budget:u32	used_by:string	status:string
+v_plan	02-plan	id,kind,target,priority,status	*	1500	architect	done
+v_impl	03-impl	id,sheet,status	*	900	verifier	done
+v_types	re/types	id,kind,namespace,name,fields,base	1..830	25000	port-agent	done
+v_methods	re/methods	id,type,name,kind	1..900	25000	port-agent	done
+v_triage	re/triage	id,score,priority	*	21000	port-agent	done
+v_evidence	re/functions	id,name,addr,ref_addr,ref_conf	1..1620	25000	extractor	done
+v_assets	re/assets	id,path,size,status	1..1920	25000	assets-agent	done
+v_strings	re/strings	id,addr,text	1..1900	25000	localisation-agent	done
+v_full	02-plan	*	*	0	architect	done
