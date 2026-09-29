@@ -88,6 +88,12 @@ pub struct Manifest {
     pub id_compound: bool,
     pub emit_rust: bool,
     pub key_alias: Vec<String>,
+    /// How many records the producer emitted, and how many were deliberately
+    /// not kept. `source_rows == rows + dropped` must hold, or evidence was
+    /// silently lost (L5, MDD 8.8 step 1 / risk R6).
+    pub source_rows: Option<usize>,
+    pub dropped: Option<usize>,
+    pub dropped_reason: String,
     pub fields: BTreeMap<String, String>,
 }
 
@@ -221,6 +227,9 @@ fn parse_manifest_line(line: &str, m: &mut Manifest) {
             "key_alias" => {
                 m.key_alias = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "-").collect()
             }
+            "source_rows" => m.source_rows = v.parse().ok(),
+            "dropped" => m.dropped = v.parse().ok(),
+            "dropped_reason" => m.dropped_reason = v.clone(),
             _ => {}
         }
         m.fields.insert(k, v);
@@ -683,6 +692,9 @@ pub fn validate(sheets: &[Sheet], base: &mut Vec<Finding>) {
     // context packs must fit their declared budgets (L6, check 25)
     check_budgets(sheets, base);
 
+    // evidence must reconcile with the producer (L5, check 24)
+    check_provenance(sheets, base);
+
     // declared defaults must themselves be valid values for their column (L1,
     // check 11). Once per column, not once per row.
     for s in sheets {
@@ -1035,6 +1047,107 @@ pub fn check_budgets(sheets: &[Sheet], out: &mut Vec<Finding>) {
         }
     }
 }
+/// L5 check 24: the evidence must reconcile with what the producer emitted.
+///
+/// This is the cheapest possible guard for the most damaging Mode B failure:
+/// MDD risk R6, "truncated extraction: a lost export silently halves the sheet".
+/// A synthesizer records how many records it saw (`source_rows`) and how many it
+/// deliberately did not keep (`dropped`, with a reason). The two must add up to
+/// the row count. Row counts alone cannot catch this, because a synthesizer that
+/// silently loses rows also reports the smaller count with a straight face; it
+/// is the *sum* that has to balance against an independently recorded total.
+pub fn check_provenance(sheets: &[Sheet], out: &mut Vec<Finding>) {
+    for s in sheets {
+        let src = match s.manifest.source_rows {
+            Some(n) => n,
+            None => continue,
+        };
+        let dropped = s.manifest.dropped.unwrap_or(0);
+        let rows = s.rows.len();
+        if rows + dropped != src {
+            out.push(Finding::err(
+                "E-L5-DIVERGE",
+                &s.name,
+                0,
+                "",
+                "",
+                format!(
+                    "provenance does not balance: source_rows={src}, rows={rows}, dropped={dropped} (rows + dropped = {}). {} Evidence was lost or double-counted; fix the synthesizer, do not edit the total.",
+                    rows + dropped,
+                    if s.manifest.dropped_reason.is_empty() { "" } else { "Recorded reason:" }
+                ),
+            ));
+            if !s.manifest.dropped_reason.is_empty() {
+                out.push(Finding::warn(
+                    "W-L5-DROPPED",
+                    &s.name,
+                    0,
+                    "",
+                    "",
+                    format!("{} record(s) dropped: {}", dropped, s.manifest.dropped_reason),
+                ));
+            }
+        }
+    }
+}
+
+/// L7 check 28: row count sanity against the last commit.
+///
+/// A sheet that halves between commits is the signature of a truncated export
+/// (MDD R6) or an over-eager filter. This shells out to git for the baseline and
+/// degrades silently when there is none - a missing baseline is not a defect.
+pub fn check_row_counts(sheets: &[Sheet], root: &Path, out: &mut Vec<Finding>) {
+    for s in sheets {
+        let committed = match committed_row_count(root, &s.rel) {
+            Some(n) if n >= 20 => n,
+            _ => continue,
+        };
+        let current = s.rows.len();
+        let ratio_pct = current * 100 / committed;
+        if ratio_pct < 80 || ratio_pct > 200 {
+            out.push(Finding::warn(
+                "W-L7-ROWCOUNT",
+                &s.name,
+                0,
+                "",
+                "",
+                format!(
+                    "row count moved from {committed} (HEAD) to {current} ({ratio_pct}% of the committed count); confirm this is intended and not a truncated export (MDD check 28 / risk R6)"
+                ),
+            ));
+        }
+    }
+}
+
+/// Count data rows in the committed version of a sheet.
+fn committed_row_count(root: &Path, rel: &str) -> Option<usize> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("show")
+        .arg(format!("HEAD:sheets/{rel}"))
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut data = 0usize;
+    let mut header_seen = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') || t.starts_with("//") {
+            continue;
+        }
+        if !header_seen {
+            header_seen = true;
+            continue;
+        }
+        data += 1;
+    }
+    Some(data)
+}
+
 /// L0 check 5: the data-sheet header row is a courtesy; the authoritative
 /// declaration is `01-schema.tsv`. Two copies that can drift is how projects
 /// rot, so drift is a hard error rather than a warning (MDD 5.3).
@@ -1612,11 +1725,11 @@ pub const RULES: &[RuleCheck] = &[
     RuleCheck { n: "21", name: "Kernel allowlist complete", status: "unexercised", emits: "E-L0-KERNEL", note: "implemented both ways; kernel/ is empty so it has never had anything to check" },
     RuleCheck { n: "22", name: "No generated file in tree", status: "implemented", emits: "E-L0-GENERATED", note: "scans for the emitter's banner outside target/ and .git (D6)" },
     RuleCheck { n: "23", name: "No hand edits to generated files", status: "partial", emits: "E-L0-GENERATED", note: "covered indirectly: generated files cannot exist in the tree at all; there is no hash comparison inside OUT_DIR" },
-    RuleCheck { n: "24", name: "Divergence vs evidence (L5)", status: "absent", emits: "",              note: "sheet-vs-producer reconciliation is not implemented" },
+    RuleCheck { n: "24", name: "Divergence vs evidence (L5)", status: "implemented", emits: "E-L5-DIVERGE", note: "source_rows must equal rows + dropped, so a silent export loss cannot balance" },
     RuleCheck { n: "25", name: "Context packs within budget (L6)", status: "implemented", emits: "E-L6-BUDGET", note: "every view in sheets/views.tsv is assembled and measured on every preflight" },
     RuleCheck { n: "26", name: "Dead columns (L6)",    status: "absent",      emits: "",               note: "the emitter is generic and consumes every column, so a dead-column rule cannot fire yet" },
     RuleCheck { n: "27", name: "Emitter determinism (L7)", status: "implemented", emits: "emit --verify-determinism", note: "re-emits into a clean directory and byte-compares; also the per-file content-hash gate" },
-    RuleCheck { n: "28", name: "Row count sanity",     status: "absent",      emits: "",               note: "no last-commit comparison" },
+    RuleCheck { n: "28", name: "Row count sanity",     status: "implemented", emits: "W-L7-ROWCOUNT", note: "compares each sheet's row count to the committed one via git; degrades silently when there is no baseline" },
     RuleCheck { n: "+",  name: "Mode B evidence on every row (MDD 8.9)", status: "implemented", emits: "E-L2-NOEVIDENCE", note: "applies to sheets whose manifest says evidence: required" },
     RuleCheck { n: "+",  name: "Emitter version agreement", status: "implemented", emits: "E-L0-EMITTER", note: "manifest version vs doctrine emitter_version" },
 ];

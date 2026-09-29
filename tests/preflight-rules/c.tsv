@@ -1,0 +1,19 @@
+# sheet: c
+# version: 1
+# generator: fixture
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+# Fixture for L5 provenance (MDD check 24 / risk R6). The producer claims it
+# emitted 100 records and that none were dropped, but only two rows exist.
+# rows + dropped (2) != source_rows (100), so E-L5-DIVERGE must fire. This is the
+# signature of a truncated export, which is why the sum has to balance against an
+# independently recorded total rather than the row count being taken on trust.
+# source_rows: 100
+# dropped: 0
+# dropped_reason: -
+id:string*	note:string
+r1	first
+r2	second

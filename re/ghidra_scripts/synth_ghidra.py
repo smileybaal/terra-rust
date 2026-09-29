@@ -144,7 +144,13 @@ disassembly request fails with "No instruction at address". Consequently:
 
     header = (
         manifest("re/functions", "functions", "re/sources",
-                 "CLI-managed symbol inventory from Ghidra. One row per symbol record.\n# dec013: instructions=0, so size/calls/called_by are NOT code measurements.") +
+                 "CLI-managed symbol inventory from Ghidra. One row per symbol record.\n# dec013: instructions=0, so size/calls/called_by are NOT code measurements.",
+                 extra="\n".join([
+                     f"# source_rows: {len(funcs)}",
+                     f"# dropped: {len(rows) - len({r[0] for r in rows})}",
+                     "# dropped_reason: -" if len(rows) == len({r[0] for r in rows})
+                     else "# dropped_reason: duplicate ids folded by the writer",
+                 ])) +
         "id:string*\tname:string\taddr:string\tsize:u32\tcalls:u16\tcalled_by:u16\ttags:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     )
     n = write(os.path.join(ROOT, "sheets", "re", "functions.tsv"), header, rows)
@@ -190,7 +196,13 @@ def do_types() -> int:
     header = (
         manifest("re/types_pe", "types_pe", "re/sources",
                  "PE-side data type inventory from Ghidra's data type manager.\n# This is NOT the managed type inventory; that is re/types.tsv (ILSpy).\n# id_form: compound",
-                 evidence="none") +
+                 evidence="none",
+                 extra="\n".join([
+                     f"# source_rows: {len(items)}",
+                     f"# dropped: {len(items) - len({r[0] for r in rows})}",
+                     "# dropped_reason: -" if len(items) == len({r[0] for r in rows})
+                     else "# dropped_reason: sanitized names folded together (see the name column)",
+                 ])) +
         "id:string*\tkind:string\tsize:string\tname:string\tpath:string\tartifact:string\n"
     )
     n = write(os.path.join(ROOT, "sheets", "re", "types_pe.tsv"), header, rows)
@@ -238,7 +250,12 @@ def do_strings() -> int:
         ])
     header = (
         manifest("re/strings", "strings", "re/sources",
-                 "String table from Ghidra. Rows whose text contains TAB or newline are\n# excluded (dec008).") +
+                 "String table from Ghidra. Rows whose text contains TAB or newline are\n# excluded (dec008).",
+                 extra="\n".join([
+                     f"# source_rows: {len(strings)}",
+                     f"# dropped: {excluded + (len(rows) - len({r[0] for r in rows}))}",
+                     "# dropped_reason: text contains TAB or newline, which the canonical form forbids (dec008)",
+                 ])) +
         "id:string*\taddr:string\ttext:string\tlength:u16\tx_refs:u16\tuse:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     )
     n = write(os.path.join(ROOT, "sheets", "re", "strings.tsv"), header, rows)
@@ -257,6 +274,7 @@ def do_assets() -> int:
     if not isinstance(strings, list):
         return 0
     manifest_txt = None
+    addr = ""
     for s in strings:
         if isinstance(s, dict) and str(s.get("value", "")).startswith("Path\tWidth\tHeight"):
             manifest_txt = str(s["value"])
@@ -272,10 +290,12 @@ def do_assets() -> int:
 
     rows = []
     seen: dict[str, int] = {}
+    parsed = 0
     for line in manifest_txt.split("\n")[1:]:
         parts = line.split("\t")
         if len(parts) < 3:
             continue
+        parsed += 1
         path, w, h = parts[0].strip(), parts[1].strip(), parts[2].strip()
         if not path:
             continue
@@ -310,7 +330,13 @@ def do_assets() -> int:
         ])
     header = (
         manifest("re/assets", "assets", "re/sources",
-                 "Content inventory. Source is the Path/Width/Height manifest embedded in the\n# binary itself, cross-checked against re/content.\n# id_form: compound") +
+                 "Content inventory. Source is the Path/Width/Height manifest embedded in the\n# binary itself, cross-checked against re/content.\n# id_form: compound",
+                 extra="\n".join([
+                     f"# source_rows: {parsed}",
+                     f"# dropped: {parsed - len({r[0] for r in rows})}",
+                     "# dropped_reason: -" if parsed == len({r[0] for r in rows})
+                     else "# dropped_reason: slash-normalised paths folded to the same id",
+                 ])) +
         "id:string*\tpath:string\tsize:u64\tsha256:string\tloader:string\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     )
     n = write(os.path.join(ROOT, "sheets", "re", "assets.tsv"), header, rows)

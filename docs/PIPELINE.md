@@ -89,6 +89,20 @@ python re/ghidra_scripts/synth_ilspy.py      # -> re/types, re/methods
 Both scripts write canonical form (UTF-8 no BOM, LF, TAB), dedup by id, and
 put `ref_addr` + `ref_conf` + `evidence` on every row.
 
+They also record **provenance** in each sheet's manifest, which preflight checks:
+
+```
+# source_rows: 21159
+# dropped: 78
+# dropped_reason: text contains TAB or newline, which the canonical form forbids (dec008)
+```
+
+`rows + dropped` must equal `source_rows`, or `E-L5-DIVERGE` fails the build. This
+is the guard for MDD risk R6 (a silently truncated export): a synthesizer that
+loses rows also reports the smaller row count, so only the sum can betray it.
+When you add a synthesizer, set these fields honestly - `dropped: 0` on a sheet
+that clearly lost rows is a lie the balance check will not catch.
+
 ## 5. Validate (preflight gates everything, D5)
 
 ```
@@ -118,12 +132,16 @@ passes".
 
 ```
 powershell -File tools/test-preflight.ps1
+powershell -File tools/test-truncation.ps1
 ```
 
-This runs the engine against `tests/preflight-rules/`, a fixture that
-deliberately breaks seven rules, and asserts each diagnostic appears; then it
-asserts the real book is still clean. A rule that has never been seen to fire is
-not a verified rule (MDD: "a rule that never fires may be checking nothing").
+The first runs the engine against `tests/preflight-rules/`, a fixture that
+deliberately breaks eight rules, and asserts each diagnostic appears; then it
+asserts the real book is still clean. The second truncates a committed sheet to
+100 rows, asserts both truncation guards fire, and restores the file.
+
+A rule that has never been seen to fire is not a verified rule (MDD: "a rule that
+never fires may be checking nothing").
 
 **`schema --emit` is a bootstrap tool, not a routine command.** It generates
 `01-schema.tsv` from the current headers. Once committed, the schema is the

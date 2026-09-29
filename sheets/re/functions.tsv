@@ -7,7 +7,9 @@
 # owned_by: extractor
 # doctrine: D1
 # evidence: required
-
+# source_rows: 18300
+# dropped: 0
+# dropped_reason: -
 # CLI-managed symbol inventory from Ghidra. One row per symbol record.
 # dec013: instructions=0, so size/calls/called_by are NOT code measurements.
 id:string*	name:string	addr:string	size:u32	calls:u16	called_by:u16	tags:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string

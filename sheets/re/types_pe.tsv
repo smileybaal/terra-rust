@@ -7,7 +7,9 @@
 # owned_by: extractor
 # doctrine: D1
 # evidence: none
-
+# source_rows: 68272
+# dropped: 4
+# dropped_reason: sanitized names folded together (see the name column)
 # PE-side data type inventory from Ghidra's data type manager.
 # This is NOT the managed type inventory; that is re/types.tsv (ILSpy).
 # id_form: compound

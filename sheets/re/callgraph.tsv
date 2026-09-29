@@ -14,6 +14,9 @@
 # decompiled C# declarations: base/interface -> inherits, a type named in a
 # method signature -> uses. Ambiguous short names are skipped, not guessed.
 # id_form: compound
+# source_rows: 2212
+# dropped: 0
+# dropped_reason: the same (from,to,kind) triple seen more than once folds to one edge
 id:string*	from:string	to:string	kind:string	status:string	ref_addr:string	ref_conf:string	evidence:string
 terraria.achievements.achievement__terraria.achievements.achievementcategory__uses	terraria.achievements.achievement	terraria.achievements.achievementcategory	uses	identified	ilspy:ilspy/Terraria/Achievements/Achievement.cs	probable	ilspycmd C# declaration references AchievementCategory
 terraria.achievements.achievement__terraria.achievements.achievementcondition__uses	terraria.achievements.achievement	terraria.achievements.achievementcondition	uses	identified	ilspy:ilspy/Terraria/Achievements/Achievement.cs	probable	ilspycmd C# declaration references AchievementCondition

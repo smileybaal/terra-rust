@@ -2,7 +2,7 @@
 #
 # A rule that has never been seen to fire is not a verified rule, and the MDD
 # says as much: "A rule that never fires may be checking nothing." This script
-# runs the engine against a fixture that deliberately breaks four rules and
+# runs the engine against a fixture that deliberately breaks eight rules and
 # asserts each expected diagnostic code appears.
 #
 # Exit 0 = every expected rule fired. Exit 1 = at least one did not.
@@ -28,7 +28,8 @@ $expected = @(
     @{ code = "E-L2-TOPO";    why = "a cycle means no topological order exists" },
     @{ code = "E-L1-EMPTY";   why = "empty required cell handling" },
     @{ code = "E-L0-NOSCHEMA";why = "the fixture has no 01-schema.tsv" },
-    @{ code = "W-L0-SHORT";   why = "a row omits trailing empty cells (dec004)" }
+    @{ code = "W-L0-SHORT";   why = "a row omits trailing empty cells (dec004)" },
+    @{ code = "E-L5-DIVERGE"; why = "c.tsv claims source_rows=100 with 0 dropped but has 2 rows" }
 )
 
 $missing = @()

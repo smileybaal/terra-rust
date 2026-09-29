@@ -10,6 +10,9 @@
 # Managed method inventory from ILSpy. ids are lowercased dotted paths;
 # the compound key joins type and method with '.', so id_form is declared.
 # id_form: compound
+# source_rows: 14052
+# dropped: 0
+# dropped_reason: -
 id:string*	type:string	name:string	signature:string	kind:string	il_offset:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
 bcrypt.net.bcrypt.char64	BCrypt.Net.BCrypt	Char64	private static int Char64(char character)	method	-	todo	ilspy/BCrypt/Net/BCrypt.cs	ilspy:ilspy/BCrypt/Net/BCrypt.cs	certain	ilspycmd ilspy/BCrypt/Net/BCrypt.cs
 bcrypt.net.bcrypt.cryptraw	BCrypt.Net.BCrypt	CryptRaw	internal byte[] CryptRaw(byte[] inputBytes, byte[] saltBytes, int workFactor)	method	-	todo	ilspy/BCrypt/Net/BCrypt.cs	ilspy:ilspy/BCrypt/Net/BCrypt.cs	certain	ilspycmd ilspy/BCrypt/Net/BCrypt.cs

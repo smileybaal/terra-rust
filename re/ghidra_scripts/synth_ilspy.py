@@ -437,6 +437,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
 
     id_by_full = {r["full"]: r["tid"] for r in records}
     edges: dict[str, list[str]] = {}
+    edge_candidates = 0
     for rec in records:
         toks = set(rec["bases"])
         for s in rec["sigtext"]:
@@ -448,6 +449,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
             tgt = id_by_full.get(tgt_full)
             if not tgt:
                 continue
+            edge_candidates += 1
             kind = "inherits" if tok in rec["bases"] else "uses"
             eid = re.sub(r"[^a-z0-9_.]+", "_", f"{rec['tid']}__{tgt}__{kind}").strip("_")
             edges[eid] = [
@@ -457,6 +459,15 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
             ]
     callgraph_rows = list(edges.values())
     stats["edges"] = len(callgraph_rows)
+    stats["edge_candidates"] = edge_candidates
+    stats["entity_count"] = len(entities)
+    stats["records"] = len(records)
+    # the writers fold duplicate ids, so "rows written" is the unique-id count,
+    # not the length of the row list. Using the list length would understate
+    # `dropped` and make the provenance balance check fail for the wrong reason.
+    stats["uniq_types"] = len({r[0] for r in types_rows})
+    stats["uniq_methods"] = len({r[0] for r in methods_rows})
+    stats["uniq_edges"] = len({r[0] for r in callgraph_rows})
 
     # -----------------------------------------------------------------------
     # triage from measured managed evidence -> re/triage.tsv
@@ -479,6 +490,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
             f"ILSpy measured fields={f} methods={m}; size proxy, because Ghidra size is unusable (dec013)",
         ])
     stats["triage"] = len(triage_rows)
+    stats["uniq_triage"] = len({r[0] for r in triage_rows})
 
     return types_rows, methods_rows, triage_rows, callgraph_rows, stats
 
@@ -496,12 +508,28 @@ def main() -> int:
 
     theader = manifest(
         "re/types", "types", "sheets/re", "re/sources", "D1",
-        extra="# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.\n# Type ids are dotted namespace paths, so the compound-key exception is declared.\n# emit: rust\n# id_form: compound",
+        extra=(
+            "# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.\n"
+            "# Type ids are dotted namespace paths, so the compound-key exception is declared.\n"
+            "# emit: rust\n"
+            "# id_form: compound\n"
+            f"# source_rows: {stats['entity_count']}\n"
+            f"# dropped: {stats['entity_count'] - stats['uniq_types']}\n"
+            "# dropped_reason: compiler-generated types have no emitted .cs file (dec010); resource "
+            "shims were also absent from the inventory comparison"
+        ),
     ) + "id:string*\tkind:string\tnamespace:string\tname:string\tfields:u16\tbase:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
 
     mheader = manifest(
         "re/methods", "methods", "sheets/re", "re/types,re/sources", "D1",
-        extra="# Managed method inventory from ILSpy. ids are lowercased dotted paths;\n# the compound key joins type and method with '.', so id_form is declared.\n# id_form: compound",
+        extra=(
+            "# Managed method inventory from ILSpy. ids are lowercased dotted paths;\n"
+            "# the compound key joins type and method with '.', so id_form is declared.\n"
+            "# id_form: compound\n"
+            f"# source_rows: {stats['methods']}\n"
+            f"# dropped: {stats['methods'] - stats['uniq_methods']}\n"
+            "# dropped_reason: -"
+        ),
     ) + "id:string*\ttype:string\tname:string\tsignature:string\tkind:string\til_offset:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
 
     nt = write_tsv(tpath, theader, types_rows)
@@ -519,7 +547,10 @@ def main() -> int:
             "# for this managed binary (dec013). The edges are derived instead from the\n"
             "# decompiled C# declarations: base/interface -> inherits, a type named in a\n"
             "# method signature -> uses. Ambiguous short names are skipped, not guessed.\n"
-            "# id_form: compound"
+            "# id_form: compound\n"
+            f"# source_rows: {stats['edge_candidates']}\n"
+            f"# dropped: {stats['edge_candidates'] - stats['uniq_edges']}\n"
+            "# dropped_reason: the same (from,to,kind) triple seen more than once folds to one edge"
         ),
     ) + "id:string*\tfrom:string\tto:string\tkind:string\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     ng = write_tsv(gpath, gheader, callgraph_rows)
@@ -535,7 +566,10 @@ def main() -> int:
             "# This sheet is keyed by re/types.id on purpose: one triage annotation\n"
             "# per type, so preflight check 13 is exempted via key_alias.\n"
             "# key_alias: re/types\n"
-            "# id_form: compound"
+            "# id_form: compound\n"
+            f"# source_rows: {stats['records']}\n"
+            f"# dropped: {stats['records'] - stats['uniq_triage']}\n"
+            "# dropped_reason: -"
         ),
     ) + "id:string*\treason:string\tscore:f32\tpriority:u8\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     ntr = write_tsv(trpath, trheader, triage_rows)

@@ -11,6 +11,9 @@
 # Type ids are dotted namespace paths, so the compound-key exception is declared.
 # emit: rust
 # id_form: compound
+# source_rows: 2960
+# dropped: 1411
+# dropped_reason: compiler-generated types have no emitted .cs file (dec010); resource shims were also absent from the inventory comparison
 id:string*	kind:string	namespace:string	name:string	fields:u16	base:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
 bcrypt.net.bcrypt	class	BCrypt.Net	BCrypt	16	-	todo	ilspy/BCrypt/Net/BCrypt.cs	ilspy:ilspy/BCrypt/Net/BCrypt.cs	certain	ilspycmd ilspy/BCrypt/Net/BCrypt.cs
 nativefiledialog	class	-	nativefiledialog	4	-	todo	ilspy/nativefiledialog.cs	ilspy:ilspy/nativefiledialog.cs	certain	ilspycmd ilspy/nativefiledialog.cs

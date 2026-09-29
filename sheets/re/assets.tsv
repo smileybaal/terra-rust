@@ -7,7 +7,9 @@
 # owned_by: extractor
 # doctrine: D1
 # evidence: required
-
+# source_rows: 15135
+# dropped: 0
+# dropped_reason: -
 # Content inventory. Source is the Path/Width/Height manifest embedded in the
 # binary itself, cross-checked against re/content.
 # id_form: compound

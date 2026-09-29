@@ -68,6 +68,7 @@ cargo run -p sheetty-cli -- pack v_types                 # assemble a view, chec
 cargo run -p sheetty-cli -- pack v_methods --rows 1..900 # ad-hoc row window
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 powershell -File tools\test-preflight.ps1  # prove the rules actually fire
+powershell -File tools\test-truncation.ps1 # prove the truncation guard fires
 ```
 
 `preflight` states its own coverage, because "preflight passed" must never be
@@ -103,8 +104,8 @@ emits the whole 125 MB assembly regardless of `-t`).
 | rows | 142,357 |
 | columns | 147 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
-| preflight rule coverage | **27 of 30** MDD checks exist (20 implemented, 6 partial, 1 unexercised, 3 absent) - run `sheetty rules` |
-| rule tests | `tools/test-preflight.ps1` asserts 7 diagnostics fire on a broken fixture and that the real book stays clean |
+| preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
+| rule tests | `tools/test-preflight.ps1` (8 diagnostics on a broken fixture) and `tools/test-truncation.ps1` (truncation guard) |
 | managed evidence (ILSpy) | 1,549 types, 14,052 methods, 28,039 fields, 715 base/interface links |
 | managed dependency edges | 2,212 (1,545 `uses`, 667 `inherits`), derived from C# declarations |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
@@ -213,6 +214,45 @@ v_types   re/types   id,kind,namespace,name,fields,base   1..830   25000
 Windows are sized to fit the budget, and the budget is enforced on every
 preflight as `E-L6-BUDGET` - including on ad-hoc `--rows` overrides, so the check
 constrains real usage rather than nodding at a pre-blessed number.
+
+## The truncation guard (MDD risk R6)
+
+"Truncated extraction: a lost export silently halves the sheet" is the most
+damaging Mode B failure, because nothing else notices - a synthesizer that loses
+rows reports the smaller count with a straight face. Two rules guard it from
+different angles, and both are proven by `tools/test-truncation.ps1`, which
+actually truncates a committed sheet and restores it:
+
+| Rule | Catches |
+|---|---|
+| `E-L5-DIVERGE` | the sheet no longer balances against its producer |
+| `W-L7-ROWCOUNT` | the count moved badly against the last commit |
+
+Every evidence sheet records how many records its producer emitted and how many
+were deliberately dropped, and the two must **add up**:
+
+```
+# source_rows: 21159
+# dropped: 78
+# dropped_reason: text contains TAB or newline, which the canonical form forbids (dec008)
+```
+
+All eight evidence sheets balance today:
+
+| sheet | source_rows | rows | dropped |
+|---|---|---|---|
+| re/functions | 18,300 | 18,300 | 0 |
+| re/strings | 21,159 | 21,081 | 78 |
+| re/assets | 15,135 | 15,135 | 0 |
+| re/types_pe | 68,272 | 68,268 | 4 |
+| re/types | 2,960 | 1,549 | 1,411 |
+| re/methods | 14,052 | 14,052 | 0 |
+| re/callgraph | 2,212 | 2,212 | 0 |
+| re/triage | 1,549 | 1,549 | 0 |
+
+The row count alone cannot catch a silent loss, because the loss changes the
+count too. It is the *sum* that has to reconcile against an independently
+recorded total.
 
 ## Legal (MDD §8.10)
 

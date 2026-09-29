@@ -16,6 +16,9 @@
 # per type, so preflight check 13 is exempted via key_alias.
 # key_alias: re/types
 # id_form: compound
+# source_rows: 1549
+# dropped: 0
+# dropped_reason: -
 id:string*	reason:string	score:f32	priority:u8	status:string	ref_addr:string	ref_conf:string	evidence:string
 bcrypt.net.bcrypt	fields=16;methods=7	17.17	1	todo	ilspy:ilspy/BCrypt/Net/BCrypt.cs	probable	ILSpy measured fields=16 methods=7; size proxy, because Ghidra size is unusable (dec013)
 nativefiledialog	fields=4;methods=17	17.15	1	todo	ilspy:ilspy/nativefiledialog.cs	probable	ILSpy measured fields=4 methods=17; size proxy, because Ghidra size is unusable (dec013)
