@@ -65,12 +65,42 @@ cargo run -p sheetty-cli -- overlap 02-plan 03-impl --key id
 
 ## Reproduce the evidence
 
+```powershell
+. .\tools\env.ps1            # pin GHIDRA_INSTALL_DIR, finite timeouts, DOTNET_ROLL_FORWARD
+tools\extract-ghidra.ps1     # wait for analysis, then bulk export with shape guards
+tools\extract-ilspy.ps1      # entity lists + full project decompile (one .cs per type)
+tools\synth.ps1              # normalize exports -> sheets/re/*.tsv, then preflight
 ```
-tools/setup.ps1            # env: GHIDRA_INSTALL_DIR, timeouts, DOTNET_ROLL_FORWARD
-tools/extract-ghidra.ps1   # ghidra import + bulk export (--expect guarded)
-tools/extract-ilspy.ps1    # ilspycmd entity lists + full project decompile
-tools/synth.ps1            # exports -> sheets/re/*.tsv (canonical form)
-```
+
+See `docs/PIPELINE.md` for exact commands, pinned versions, and the two ILSpy
+calibrations that cost time to find (`-p` is required to get source; `-il`
+emits the whole 125 MB assembly regardless of `-t`).
+
+## Verified state
+
+| Item | Value |
+|---|---|
+| target | `Terraria.exe`, PE32 i386, .NET CLI assembly, sha256 `960a03bf...` |
+| sheets | 17 |
+| rows | 120,677 |
+| columns | 146 |
+| preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
+| native evidence | 18,300 functions, 68,268 PE types, 21,159 strings (Ghidra 12.1.4) |
+| managed evidence | 1,549 types, 14,052 methods, 28,039 fields (ILSpy 9.1.0) |
+
+## What Ghidra can and cannot do here
+
+`Terraria.exe` is managed .NET. Ghidra has no CIL decompiler, and `ghidra-cli`
+says so itself:
+
+> This appears to be .NET managed code. Ghidra cannot decompile .NET IL bytecode.
+> Consider using a .NET decompiler (e.g., ilspy-cli) for better results.
+
+The split is deliberate and recorded (`dec003`, `dec012`): Ghidra produces PE,
+import, resource, string and CLI-metadata-structure evidence; **ILSpy produces
+the readable game logic**. Ghidra's auto-analysis still recovers real managed
+method names on 18,300 functions, which is useful provenance even where the
+decompiler output is not readable.
 
 ## Legal (MDD §8.10)
 
