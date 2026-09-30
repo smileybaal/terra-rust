@@ -50,6 +50,7 @@ pub mod args;
 pub mod boot;
 pub mod net;
 pub mod player;
+pub mod tiles;
 pub mod worldfile;
 
 #[cfg(test)]
