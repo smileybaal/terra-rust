@@ -10,7 +10,7 @@
 #
 # One set per platform, because the client and the server are separate relations.
 # Measured on this book (sheetty pack): an unwindowed evidence sheet is far larger
-# than any single context window. re/methods costs ~379,526 estimated tokens
+# than any single context window. re/client/methods costs ~379,526 estimated tokens
 # unwindowed, 1.9x a 200k window on its own, so a whole evidence sheet is not a
 # usable context unit - MDD open question Q6. The MDD's prescribed fix is a row
 # window rather than a smaller sheet, "because splitting the sheet would break the

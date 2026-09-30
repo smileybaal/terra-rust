@@ -15,7 +15,11 @@ is in this repository that is not a row (D4) or a listed kernel.
   Ghidra has no CIL decompiler, so the *managed* evidence (the actual game
   logic) is produced by **ILSpy** (`ilspycmd`), while Ghidra remains the
   producer of PE / import / resource / string / CLI-metadata-structure evidence.
-- Both producers write into `sheets/re/**`; every row carries
+- **The client and the server are separate sheet sets**, not one set plus a
+  hand-maintained delta sheet: two binaries are two relations. They share 1,544
+  of 1,547 type ids, so the platform split is a *query*
+  (`sheetty overlap re/client/types re/server/types`), not a table (dec015).
+- Both producers write into `sheets/re/{client,server}/**`; every row carries
   `ref_addr` + `ref_conf` + `evidence` (MDD §8.9, preflight L2).
 
 ## Layout
@@ -30,7 +34,14 @@ sheets/                 AUTHORITATIVE, committed, text only (TSV)
   work.tsv              swarm claim board
   tokens.tsv            token ledger
   decisions.tsv         recorded deviations from the MDD
-  re/                   Mode B evidence sheets
+  views.tsv             named column projections + row windows per view
+  re/                   Mode B evidence sheets, one relation per binary
+    client/             from Terraria.exe         7 sheets: types, methods,
+                        callgraph, triage, functions, strings, types_pe
+    server/             from TerrariaServer.exe   4 sheets: types, methods,
+                        callgraph, triage
+    assets.tsv          shared: both binaries load the same Content/
+    sources.tsv         shared: producer + version pins
 re/
   binaries/             checksummed working copy (never the only copy)
   exports/              regenerable, NOT committed
@@ -61,11 +72,12 @@ ingest -> normalize -> validate -> graph -> emit -> compile -> verify
 cargo run -p sheetty-cli -- preflight
 cargo run -p sheetty-cli -- report unimplemented --rank blast-radius
 cargo run -p sheetty-cli -- overlap 02-plan 03-impl --key id
+cargo run -p sheetty-cli -- overlap re/client/types re/server/types # the platform split
 cargo run -p sheetty-cli -- order          # dependency order over the sheets
 cargo run -p sheetty-cli -- rules          # which MDD checks this engine enforces
 cargo run -p sheetty-cli -- emit --out target/generated --verify-determinism
-cargo run -p sheetty-cli -- pack v_types                 # assemble a view, check its budget
-cargo run -p sheetty-cli -- pack v_methods --rows 1..900 # ad-hoc row window
+cargo run -p sheetty-cli -- pack v_client_types          # assemble a view, check its budget
+cargo run -p sheetty-cli -- pack v_server_types --rows 1..900  # ad-hoc row window
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 powershell -File tools\test-preflight.ps1  # prove the rules actually fire
 powershell -File tools\test-truncation.ps1 # prove the truncation guard fires
@@ -76,9 +88,9 @@ mistaken for "the whole MDD checklist passed". An absent rule is not a passing
 one:
 
 ```
-PREFLIGHT  sheets/  17 sheets, 142357 rows, 147 columns
+PREFLIGHT  sheets/  22 sheets, 161764 rows, 192 columns
   emitter 0.1.0
-  rule coverage  21/30 MDD checks exist (implemented 16, partial 4, unexercised 1, absent 9)
+  rule coverage  29/30 MDD checks exist (implemented 22, partial 6, unexercised 1, absent 1)
   (run `sheetty rules` for the per-check status; an absent rule is not a passing one)
 ```
 
@@ -88,7 +100,7 @@ PREFLIGHT  sheets/  17 sheets, 142357 rows, 147 columns
 . .\tools\env.ps1            # pin GHIDRA_INSTALL_DIR, finite timeouts, DOTNET_ROLL_FORWARD
 tools\extract-ghidra.ps1     # wait for analysis, then bulk export with shape guards
 tools\extract-ilspy.ps1      # entity lists + full project decompile (one .cs per type)
-tools\synth.ps1              # normalize exports -> sheets/re/*.tsv, then preflight
+tools\synth.ps1              # normalize exports -> sheets/re/{client,server}/*.tsv, then preflight
 ```
 
 See `docs/PIPELINE.md` for exact commands, pinned versions, and the two ILSpy
@@ -99,17 +111,62 @@ emits the whole 125 MB assembly regardless of `-t`).
 
 | Item | Value |
 |---|---|
-| target | `Terraria.exe`, PE32 i386, .NET CLI assembly, sha256 `960a03bf...` |
-| sheets | 17 |
-| rows | 142,357 |
-| columns | 147 |
+| target | `Terraria.exe` (client) `960a03bf...`; `TerrariaServer.exe` (server) `328872c6...`; both PE32 i386 .NET CLI assemblies |
+| sheets | 22 (13 kernel/declaration + 7 client evidence + 4 server evidence + 2 shared) |
+| rows | 161,764 |
+| columns | 192 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
 | preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
-| rule tests | `tools/test-preflight.ps1` (8 diagnostics on a broken fixture) and `tools/test-truncation.ps1` (truncation guard) |
-| managed evidence (ILSpy) | 1,549 types, 14,052 methods, 28,039 fields, 715 base/interface links |
-| managed dependency edges | 2,212 (1,545 `uses`, 667 `inherits`), derived from C# declarations |
+| rule tests | `tools/test-preflight.ps1` (8 diagnostics on a broken fixture), `tools/test-truncation.ps1` (truncation guard), `tools/test-rules-sweep.ps1` (31 codes) |
+| client evidence (ILSpy) | 1,549 types, 14,052 methods, 2,212 edges, 1,549 triage rows |
+| server evidence (ILSpy) | 1,551 types, 14,025 methods, 2,211 edges, 1,551 triage rows |
+| client vs server | 1,544 shared, 3 client-only, 5 server-only, 2 divergent |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
+
+## The client/server split
+
+`Terraria.exe` and `TerrariaServer.exe` are two binaries, so they get two sheet
+sets rather than one shared set plus a hand-maintained delta sheet. Duplicating
+the inventories looks wasteful - the two share 1,544 type ids - but a delta is a
+*copy of a derivable relation*, and a copy drifts. Instead the split is a query
+over two real relations:
+
+```
+$ sheetty overlap re/client/types re/server/types
+  covered        1544
+  unimplemented  3    terraria.audio.mp3audiotrack, terraria.audio.oggaudiotrack,
+                      terraria.testing.fxreader
+  orphan         5    natupnplib.upnpnat, natupnplib.iupnpnat,
+                      natupnplib.istaticportmapping,
+                      natupnplib.istaticportmappingcollection,
+                      terraria.properties.settings
+  divergent      2    ~ terraria.initializers.chromainitializer.fields: 17 vs 11
+                      ~ terraria.netplay.fields: 29 vs 31
+```
+
+The two `divergent` rows are the point of the whole exercise. An entity-name
+comparison - which is all a delta sheet of type *names* can carry - only sees
+that a type exists on both sides, and so reported "no gameplay type differs".
+Comparing the two separated relations compares what the rows actually *say*, and
+that found two conditionally compiled types: same name, 6 and 2 fields apart.
+Neither can be ported once; both are now regression tests in
+`crates/terraria-demo` (dec017).
+
+Beyond those two, the shape is what you would predict: the server gains UPnP
+port mapping (`natupnplib.*`) and `Properties.Settings`; the client gains its
+audio decoders (`MP3AudioTrack`, `OGGAudioTrack`) and the FX pipeline
+(`FxReader`).
+
+Making the comparison tell the truth required excluding provenance columns from
+it. `artifact` legitimately differs per platform (`ilspy/...` vs
+`ilspy_server/...`), and comparing it reported `covered 0 / divergent 4640` for
+1,546 identical types. Comparing provenance as data can never show agreement
+between two producers (dec016); the reserved-column set is now explicit in the
+overlap engine.
+
+Ghidra has only analysed the client, so the server has no `functions`,
+`strings` or `types_pe` sheets yet (dec015, t0007).
 
 ## What Ghidra actually produced here (read this before trusting the sheets)
 
@@ -131,9 +188,9 @@ Consequences, all recorded in `sheets/decisions.tsv`:
 
 | | |
 |---|---|
-| `re/functions.tsv` | relabelled `status: symbol_only`; `size` is a metadata record length, not code size (dec013) |
-| `re/triage.tsv` | **not** scored from Ghidra size, because that would be scoring nothing. Scored from ILSpy-measured fields and methods per type, which tops out at `Terraria.Player` (1316 fields, 865 methods), `Main`, `WorldGen` - which are Terraria's largest classes (dec013) |
-| `re/callgraph.tsv` | Ghidra contributed no edges. Edges are derived from the decompiled C# declarations instead (dec013) |
+| `re/client/functions.tsv` | relabelled `status: symbol_only`; `size` is a metadata record length, not code size (dec013) |
+| `re/client/triage.tsv` | **not** scored from Ghidra size, because that would be scoring nothing. Scored from ILSpy-measured fields and methods per type, which tops out at `Terraria.Player` (1316 fields, 865 methods), `Main`, `WorldGen` - which are Terraria's largest classes (dec013) |
+| `re/client/callgraph.tsv` | Ghidra contributed no edges. Edges are derived from the decompiled C# declarations instead (dec013) |
 | Ghidra program state | `find string ""` mutated it (strings 21159 to 29). Prefer explicit patterns; re-import before trusting state (dec014) |
 
 Ghidra is still the right tool for what it *can* do here: PE structure, imports,
@@ -169,23 +226,25 @@ and each row becomes a `Def { .. }` in a sorted `ALL` slice. `crates/terraria-de
 
 ```
 $ cargo test -p terraria-demo
-warning: terraria-demo@0.1.0: sheetty: 3 module(s), 3 written, 0 unchanged
+warning: terraria-demo@0.1.0: sheetty: 4 module(s), 4 written, 0 unchanged
 warning: terraria-demo@0.1.0:   plan <- 02-plan (16 rows)
-warning: terraria-demo@0.1.0:   re_types <- re/types (1549 rows)
-warning: terraria-demo@0.1.0:   registry <- (registry) (17 rows)
+warning: terraria-demo@0.1.0:   re_client_types <- re/client/types (1549 rows)
+warning: terraria-demo@0.1.0:   re_server_types <- re/server/types (1551 rows)
+warning: terraria-demo@0.1.0:   registry <- (registry) (22 rows)
 
-test tests::a_row_projectes_to_a_def ... ok          # Terraria.Player, 1316 fields
+test tests::a_row_projects_to_a_def ... ok           # Terraria.Player, 1316 fields
+test tests::the_two_conditional_compilation_divergences_are_visible ... ok
 ```
 
 The doctrine this exercises, and how it was verified rather than asserted:
 
 | Doctrine | Verified by |
 |---|---|
-| D2 one row, one strut | `re/types.tsv` 1549 rows -> 1549 `Def` values; `by_id("terraria.player").fields == 1316` |
+| D2 one row, one strut | `re/client/types.tsv` 1549 rows -> 1549 `Def` values; `by_id("terraria.player").fields == 1316` |
 | D5 emit gated on preflight | `sheetty emit --sheets tests/preflight-rules` refuses with 7 errors and writes nothing |
 | D6 banner, never committed | `E-L0-GENERATED` fires when a generated file is planted in the tree |
-| 5.9 one module per sheet | separate `plan.rs` / `re_types.rs`, plus a counts-only `registry.rs` |
-| 5.9 hash-gated writes | second `emit` run reports `0 written, 3 unchanged` |
+| 5.9 one module per sheet | separate `plan.rs`, `re_client_types.rs`, `re_server_types.rs`, plus a counts-only `registry.rs` |
+| 5.9 hash-gated writes | second `emit` run reports `0 written, 4 unchanged` |
 | L7 determinism | `emit --verify-determinism` byte-compares a clean re-emit: 0 differing files |
 
 ## Context packs and views (why the evidence sheets are windowed)
@@ -197,9 +256,9 @@ get before it stops being a good context unit?") with a number:
 
 | view | rows | est. tokens |
 |---|---|---|
-| `re/methods` unwindowed | 14,052 | **~379,526** |
-| `re/strings` unwindowed | 21,081 | ~269,180 |
-| `re/functions` unwindowed | 18,300 | ~267,598 |
+| `re/client/methods` unwindowed | 14,052 | **~379,526** |
+| `re/client/strings` unwindowed | 21,081 | ~269,180 |
+| `re/client/functions` unwindowed | 18,300 | ~267,598 |
 | `re/assets` unwindowed | 15,135 | ~180,828 |
 
 A whole evidence sheet is 1.9x a 200k context window on its own, so it is not a
@@ -208,7 +267,8 @@ sheet, "because splitting the sheet would break the key space". `sheets/views.ts
 therefore declares both a column projection and a row window per view:
 
 ```
-v_types   re/types   id,kind,namespace,name,fields,base   1..830   25000
+v_client_types   re/client/types   id,kind,namespace,name,fields,base   1..830   25000
+v_server_types   re/server/types   id,kind,namespace,name,fields,base   1..830   25000
 ```
 
 Windows are sized to fit the budget, and the budget is enforced on every
@@ -237,18 +297,22 @@ were deliberately dropped, and the two must **add up**:
 # dropped_reason: text contains TAB or newline, which the canonical form forbids (dec008)
 ```
 
-All eight evidence sheets balance today:
+All twelve evidence sheets balance today:
 
 | sheet | source_rows | rows | dropped |
 |---|---|---|---|
-| re/functions | 18,300 | 18,300 | 0 |
-| re/strings | 21,159 | 21,081 | 78 |
+| re/client/functions | 18,300 | 18,300 | 0 |
+| re/client/strings | 21,159 | 21,081 | 78 |
+| re/client/types_pe | 68,272 | 68,268 | 4 |
+| re/client/types | 2,960 | 1,549 | 1,411 |
+| re/client/methods | 14,052 | 14,052 | 0 |
+| re/client/callgraph | 2,212 | 2,212 | 0 |
+| re/client/triage | 1,549 | 1,549 | 0 |
+| re/server/types | 2,958 | 1,551 | 1,407 |
+| re/server/methods | 14,025 | 14,025 | 0 |
+| re/server/callgraph | 2,211 | 2,211 | 0 |
+| re/server/triage | 1,551 | 1,551 | 0 |
 | re/assets | 15,135 | 15,135 | 0 |
-| re/types_pe | 68,272 | 68,268 | 4 |
-| re/types | 2,960 | 1,549 | 1,411 |
-| re/methods | 14,052 | 14,052 | 0 |
-| re/callgraph | 2,212 | 2,212 | 0 |
-| re/triage | 1,549 | 1,549 | 0 |
 
 The row count alone cannot catch a silent loss, because the loss changes the
 count too. It is the *sum* that has to reconcile against an independently

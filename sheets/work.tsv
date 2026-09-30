@@ -7,7 +7,11 @@
 # owned_by: integrator
 # doctrine: D1
 id:string*	sheet:string	row_range:string	role:string	agent:string	state:string	ts:string	evidence:string
-t0001	re/functions	all	extractor	ghidra-agent	open	2026-09-29T22:47Z	ghidra project terraria
-t0002	re/types	all	extractor	ilspy-agent	open	2026-09-29T22:50Z	re/exports/ilspy_entities_*.txt
-t0003	re/methods	all	extractor	ilspy-agent	open	2026-09-29T22:50Z	re/exports/ilspy
+t0001	re/client/functions	all	extractor	ghidra-agent	open	2026-09-29T22:47Z	ghidra project terraria
+t0002	re/client/types	all	extractor	ilspy-agent	open	2026-09-29T22:50Z	re/exports/ilspy_entities_*.txt
+t0003	re/client/methods	all	extractor	ilspy-agent	open	2026-09-29T22:50Z	re/exports/ilspy
 t0004	01-schema	all	architect	architect	open	2026-09-29T22:51Z	schema bootstrap
+t0005	re/server/types	all	extractor	ilspy-agent	open	2026-09-30T00:30Z	re/exports/ilspy_server_entities_*.txt
+t0006	re/server/methods	all	extractor	ilspy-agent	open	2026-09-30T00:30Z	re/exports/ilspy_server
+t0007	re/server/functions	all	extractor	ghidra-agent	open	2026-09-30T00:30Z	no ghidra project for TerrariaServer.exe yet; dec015 records that ghidra analysed the client only
+t0008	re/client/strings	all	extractor	ghidra-agent	open	2026-09-30T00:30Z	re/exports/ghidra/strings_all.json

@@ -23,6 +23,16 @@ $target = "sheets/re/client/triage.tsv"
 $bak = "re/exports/_trunc.bak"
 
 if (-not (Test-Path $target)) { throw "missing $target" }
+
+# The guard reads its baseline from git (`git show HEAD:sheets/<rel>`), and degrades
+# silently when the sheet is not yet committed - which is correct in the engine (a
+# missing baseline is not a defect) but wrong here, because the test would then
+# "pass" by exercising nothing. This happened for real: the guard did not fire
+# while the sheet was still untracked. Assert the precondition loudly instead.
+& git show "HEAD:$($target -replace '\\', '/')" *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "no committed baseline for $target; commit it first, or this test proves nothing"
+}
 Copy-Item $target $bak -Force
 
 try {

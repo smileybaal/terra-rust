@@ -9,9 +9,11 @@ Inputs (all under re/exports/):
   ilspy_entities_{c,s,e,i,d}.txt   entity inventories ("Class Terraria.Foo")
   ilspy/**/*.cs                    the decompiled project tree (one file per type)
 
-Outputs:
-  sheets/re/types.tsv
-  sheets/re/methods.tsv
+Outputs, one set per managed subject (see TARGETS below):
+  sheets/re/<platform>/types.tsv
+  sheets/re/<platform>/methods.tsv
+  sheets/re/<platform>/callgraph.tsv
+  sheets/re/<platform>/triage.tsv
 
 Canonical form (MDD 5.2): UTF-8 no BOM, LF, TAB delimited. Rows are sorted by
 id. Every row carries ref_addr + ref_conf + evidence (MDD 8.9 / O16).
@@ -440,7 +442,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
     stats["unmatched_types"] = len(set(ent_kind) - seen_types)
 
     # -----------------------------------------------------------------------
-    # managed type-dependency edges -> re/callgraph.tsv
+    # managed type-dependency edges -> re/<platform>/callgraph.tsv
     #
     # dec013: Ghidra decoded 0 instructions, so it yields no edges at all
     # (`ghidra graph calls` reports edge_count=0). The managed dependency graph
@@ -496,7 +498,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
     stats["uniq_edges"] = len({r[0] for r in callgraph_rows})
 
     # -----------------------------------------------------------------------
-    # triage from measured managed evidence -> re/triage.tsv
+    # triage from measured managed evidence -> re/<platform>/triage.tsv
     #
     # MDD 8.5 scores a function by log(size) and xrefs. Neither is available
     # here: Ghidra decoded no code (dec013), so its `size` is a metadata record

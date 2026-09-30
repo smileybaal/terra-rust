@@ -82,8 +82,8 @@ Two calibrations learned the hard way:
 ## 4. Normalize (raw exports -> canonical sheets)
 
 ```
-python re/ghidra_scripts/synth_ghidra.py     # -> re/functions, re/triage, re/types_pe, re/strings, re/assets
-python re/ghidra_scripts/synth_ilspy.py      # -> re/types, re/methods
+python re/ghidra_scripts/synth_ghidra.py     # -> re/client/{functions,strings,types_pe}, re/assets
+python re/ghidra_scripts/synth_ilspy.py      # -> re/{client,server}/{types,methods,callgraph,triage}
 ```
 
 Both scripts write canonical form (UTF-8 no BOM, LF, TAB), dedup by id, and
@@ -111,12 +111,12 @@ cargo run -p sheetty-cli -- preflight --json
 cargo run -p sheetty-cli -- preflight --layer L0
 cargo run -p sheetty-cli -- overlap 02-plan 03-impl
 cargo run -p sheetty-cli -- report unimplemented --rank blast-radius
-cargo run -p sheetty-cli -- view re/triage --cols id,score,priority,ref_addr
+cargo run -p sheetty-cli -- view re/client/triage --cols id,score,priority,ref_addr
 cargo run -p sheetty-cli -- schema            # list declarations
 cargo run -p sheetty-cli -- order             # dependency order (Kahn)
 cargo run -p sheetty-cli -- rules             # which MDD checks exist, and which do not
-cargo run -p sheetty-cli -- pack v_types      # context pack + budget check (L6)
-cargo run -p sheetty-cli -- pack v_methods --rows 1..900 --out re/ctx/pack.txt
+cargo run -p sheetty-cli -- pack v_client_types      # context pack + budget check (L6)
+cargo run -p sheetty-cli -- pack v_client_methods --rows 1..900 --out re/ctx/pack.txt
 cargo run -p sheetty-cli -- schema --emit sheets/01-schema.tsv   # bootstrap only
 ```
 

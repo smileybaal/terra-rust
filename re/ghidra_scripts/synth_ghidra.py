@@ -108,7 +108,7 @@ def write(path: str, header: str, rows: list[list[str]]) -> int:
 # ---------------------------------------------------------------------------
 
 def do_functions() -> int:
-    """re/functions.tsv from ghidra's CLI symbol table.
+    """re/client/functions.tsv from ghidra's CLI symbol table.
 
     IMPORTANT (dec013): `ghidra stats` reports instructions=0 for this binary.
     Ghidra's CLI analyzer created 18300 function objects carrying names and
@@ -116,7 +116,7 @@ def do_functions() -> int:
 disassembly request fails with "No instruction at address". Consequently:
     - `size` is NOT a code size and must not be read as complexity,
     - `calls`/`called_by` are unknown (they are recorded as 0 and flagged),
-    - no call-graph edges exist (see re/callgraph.tsv),
+    - no call-graph edges exist (see re/client/callgraph.tsv),
     - MDD 8.5 triage scoring is meaningless here and is NOT emitted.
 
     The rows are still worth keeping: this is a real symbol inventory, and it is
@@ -217,7 +217,7 @@ def do_types() -> int:
 
 
 def do_strings() -> int:
-    """re/strings.tsv from ghidra's recovered string table.
+    """re/client/strings.tsv from ghidra's recovered string table.
 
     dec008: rows whose text contains TAB or newline are excluded. The canonical
     TSV form forbids unescaped tabs, and a string table is exactly where they
@@ -358,7 +358,7 @@ def do_callgraph() -> int:
     dec013: Ghidra decoded 0 instructions for this binary, so there are no CALL
     references to walk and `ghidra graph calls` returns edge_count=0.
 
-    This producer must not write re/callgraph.tsv: the managed producer owns
+    This producer must not write re/client/callgraph.tsv: the managed producer owns
     that sheet, because it is the only one that can see edges on this target.
     Writing an empty sheet here would clobber real edges whenever the scripts
     run in a different order. Instead we record and assert the measurement.
@@ -372,7 +372,7 @@ def do_callgraph() -> int:
 
     print(f"ghidra callgraph   edge_count={edge_count} over node_count={node_count} (expected 0: no decoded code)")
     if edge_count not in (0, None):
-        print("    WARNING: ghidra reported edges, which contradicts dec013; investigate before trusting re/callgraph.tsv")
+        print("    WARNING: ghidra reported edges, which contradicts dec013; investigate before trusting re/client/callgraph.tsv")
     return 0 if edge_count in (0, None) else 1
 
 

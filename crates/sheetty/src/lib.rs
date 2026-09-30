@@ -1845,7 +1845,7 @@ const RUST_KEYWORDS: &[&str] = &[
     "virtual", "yield",
 ];
 
-/// `type` is a Rust keyword and `type` is a real column in re/methods, so raw
+/// `type` is a Rust keyword and `type` is a real column in re/*/methods, so raw
 /// identifiers are not optional here.
 fn field_ident(name: &str) -> String {
     if RUST_KEYWORDS.contains(&name) {
@@ -1855,7 +1855,7 @@ fn field_ident(name: &str) -> String {
     }
 }
 
-/// `02-plan` -> `plan`, `re/types` -> `re_types`. The numeric ordering prefix is
+/// `02-plan` -> `plan`, `re/client/types` -> `re_client_types`. The numeric prefix is
 /// stripped because a Rust module cannot start with a digit.
 pub fn module_name(sheet_name: &str) -> String {
     let mut s = sheet_name.replace(['/', '-'], "_");
