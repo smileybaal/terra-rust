@@ -9,7 +9,8 @@
 # Mode B raw material is regenerable; the evidence sheet is the artifact (MDD §4)
 /re/exports/
 /re/ghidra_projects/
-/re/traces/*.tsv
+/re/traces/*
+!/re/traces/*.sha256
 /re/ctx/
 # A copy of a game file is never committed, whatever it is called. re/binaries is
 # a CHECKSUMMED working copy (see tools/verify-binaries.py): the .sha256 files are
@@ -39,6 +40,3 @@ __pycache__/
 # projected docs
 /docs/generated/*
 !/docs/generated/.gitkeep
-
-# keep the committed trace hashes
-!/re/traces/*.sha256

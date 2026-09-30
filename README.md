@@ -46,13 +46,13 @@ sheets/                 AUTHORITATIVE, committed, text only (TSV)
   kernel.tsv            hand-written module allowlist (D4)
   work.tsv              swarm claim board
   tokens.tsv            token ledger
-  decisions.tsv         recorded deviations from the MDD (dec001-dec020)
+  decisions.tsv         recorded deviations from the MDD (dec001-dec021)
   views.tsv             named column projections + row windows per view
   re/                   Mode B evidence sheets, one relation per binary
     client/             from Terraria.exe         8 sheets: types, fields,
                         methods, callgraph, triage, functions, strings, types_pe
     server/             from TerrariaServer.exe   5 sheets: types, fields,
-                        methods, callgraph, triage
+                        methods, callgraph, triage + localization
     assets.tsv          shared: both binaries load the same Content/
     sources.tsv         shared: producer + version pins
 re/
@@ -60,7 +60,7 @@ re/
   exports/              regenerable, NOT committed
   ghidra_projects/      Ghidra project cache, NOT committed
   ghidra_scripts/       extraction scripts (committed)
-  traces/               parity traces; commit hashes only
+  traces/               wire captures, NOT committed; only *.sha256 survives
 crates/
   sheetty/              parser, schema checker, overlap engine, emitter (incl. the port projection)
   sheetty-cli/          `sheetty preflight | overlap | report | view | emit | pack`
@@ -68,8 +68,21 @@ crates/
   terraria-server/      the server binary: a thin shim, deliberately almost empty
 kernel/                 the hand-written Rust server: lib.rs, args.rs, boot.rs (listed in kernel.tsv)
                         owns the GENERATED port it includes at build time from $OUT_DIR
-tools/                  test harnesses and the managed-sheet invariant verifier
+tools/                  the compatibility harness (see below), test harnesses, verifiers
+  wire.py               the wire protocol in ONE place: framing, book-sourced message
+                        names, .NET primitives, body decoders
+  barrier.py            predicts from the sheets where a client stops, before connecting
+  capture.py            records a conversation (client, proxy, or both) to JSONL
+  compat.py             diffs two traces and names the first divergence
+  test-compat.py        proves the comparator reports ALIGNED, DIVERGED and SHORT
+  check-tile-framing.py inflates a real section with zlib, as the client does
+  read-world-mode.py    the world's gameMode, from the port's own WorldData
+  replay-client.py      the opening sequence, with the sections inflated in Python
+  mitm.py               the roadmap's Stage 0 entry point; now a shim over capture.py
 docs/                   pipeline notes; docs/generated/ is projected, never hand-edited
+  engine.md             the sheetty engine: commands, layers, rules, exit codes
+  parity-roadmap.md     1:1 parity, stage by stage, every claim cited
+  plugin-roadmap.md     the native-API boundary and the Rust plugin host, stage by stage
 ```
 
 ## Pipeline
@@ -106,14 +119,23 @@ python tools\ps.py tools\test-truncation.ps1 # prove the truncation guard fires
 python tools\ps.py tools\test-rules-sweep.ps1# prove all 31 diagnostic codes fire
 python tools\verify-managed-sheets.py      # cross-sheet invariants over the managed evidence
 python tools\check-readme-numbers.py       # re-derive the figures tabulated above, or fail
+
+python tools\barrier.py                    # predict, from the sheets, where a client stops
+python tools\capture.py 127.0.0.1 7777     # BE a client; print and record what comes back
+python tools\compat.py a.jsonl b.jsonl     # diff two traces, name the first divergence
+python tools\test-compat.py                # prove the comparator can fail, at the right frame
+python tools\check-tile-framing.py         # inflate a real section with zlib, as the client does
 python tools\mitm.py --listen 127.0.0.1:1739 --target 127.0.0.1:7777   # log every packet, both directions
 ```
+
+`docs/engine.md` documents the engine itself: every subcommand, the L0-L7 layers,
+the diagnostic codes, the exit codes, and what each rule can and cannot catch.
 
 `preflight` states its own coverage, because "preflight passed" must never be
 mistaken for "the whole MDD checklist passed". An absent rule is not a passing one:
 
 ```
-PREFLIGHT  sheets/  25 sheets, 229438 rows, 234 columns
+PREFLIGHT  sheets/  25 sheets, 229439 rows, 234 columns
   emitter 0.1.0
   rule coverage  29/30 MDD checks exist (implemented 22, partial 6, unexercised 1, absent 1)
   (run `sheetty rules` for the per-check status; an absent rule is not a passing one)
@@ -165,6 +187,62 @@ whole 125 MB assembly regardless of `-t`).
 | Rust kernel (hand-written) | `kernel/{lib,args,boot,net,player,tiles,worlddata,worldfile}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 104 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
+
+## The compatibility harness (does a real client actually get in?)
+
+Parity is not checkable by reading code, only by diffing two wire traces. So the
+repository now records traces and diffs them, and the tooling names every message
+from the same rows the Rust port is projected from, so a tool and the server cannot
+disagree about what message 4 is called.
+
+```
+python tools\barrier.py                       # predict, from the sheets, where a client stops
+python tools\capture.py 127.0.0.1 7777 --out re\traces\port.jsonl      # BE a client, record
+python tools\capture.py --mode proxy --target 127.0.0.1:7777 --out re\traces\vanilla.jsonl
+python tools\compat.py re\traces\native.jsonl re\traces\port.jsonl     # diff, name the first divergence
+python tools\test-compat.py                   # prove the comparator can FAIL
+python tools\check-tile-framing.py            # inflate a real section with zlib, as the client does
+python tools\read-world-mode.py               # the world's gameMode, from the port's own WorldData
+```
+
+### What is verified, and how
+
+| Claim | How it was checked |
+|---|---|
+| A real vanilla client joins the port | A live client completed the join: `awdasdasw has joined.` on the native log, and all 15 sections streamed, 450,000 tiles, `State 3 -> 10` |
+| Two runs of the port are identical | `compat.py` reports **ALIGNED**: 28 frames, same ids, same lengths, same content |
+| The relay does not alter the stream | A trace recorded **through the proxy** is ALIGNED with one recorded directly - so the proxy is transparent, which is checked rather than assumed |
+| The comparator can fail | `test-compat.py` mutates a real trace four ways: a flipped body byte, a removed frame, an appended frame, and an unmutated control. All four are reported at the **exact frame index** |
+| Tile sections are readable by a client | The body is ONE raw deflate stream with the rectangle INSIDE it (`NetMessage.DecompressTileBlock`), checked with `zlib.decompressobj(-15)`: `x=3800 y=150 w=200 h=150` |
+| The prediction matches the server | `barrier.py` reads the ids the kernel sheet claims (17) and finds no barrier in the client's opening |
+
+### What the harness found
+
+Three findings, each invisible before there was a trace to read:
+
+1. **The kernel sheet was behind the kernel.** `barrier.py` predicted a stop at
+   message 68 against a server that answers 68. The server was right and the sheet
+   was wrong: it never recorded the early-burst ids it accepts (16, 42, 50, 68, 147),
+   nor the world-transfer ids. Fixed in `sheets/kernel.tsv` (k0005, k0010). The first
+   attempt at the fix named a module, `serve`, that does not exist - and **preflight
+   refused the build** with `E-L0-KERNEL`, which is check 21 doing its job.
+2. **Deflate output is not comparable byte-for-byte.** The native server compresses;
+   the port emits stored blocks. Both are legal and both inflate to the same tiles, so
+   `compat.py` canonically **inflates** a section before comparing it. A raw byte diff
+   would report a divergence for two servers a client cannot tell apart, and a false
+   failure is worse than no check.
+3. **A divergence against the native server, named and located.** Against
+   `TerrariaServer.exe` v1.4.5.8 on the same world, `compat.py` stops at **frame 1**:
+   `PlayerInfo` is 4 bytes on the native (`01 00 07 00`, slot 1) and 2 on the port
+   (`00 00`, slot 0). `NetMessage.SendData` case 3 (`NetMessage.cs:151-154`) writes
+   exactly 2 bytes, so the native's extra pair comes from elsewhere. That is an open
+   question, and it is now a measurement rather than a guess.
+
+Two bugs in the harness itself were caught by running it: `StatusTextSize`'s max is an
+**int32**, not a byte (reading it as a byte desynchronised the rest of the body and
+reported an empty localization key), and the first trace format stored only a body
+**hash**, so a diff could say "these runs differ" but never *what* differed. Traces
+store the body now.
 
 ## The Rust port
 
@@ -263,29 +341,39 @@ Done, and verified:
 - The client/server split derived by query rather than maintained by hand.
 - The Rust server port generated from the sheets and **compiling**, with the
   hand-written kernel mirroring the real entry point and **serving** it: a real
-  client completes the `Hello` handshake and a wrong greeting is refused with the
-  localization key the C# uses.
+  client completes the `Hello` handshake, receives the world, and completes the join.
+- **A compatibility harness that can fail.** `tools/compat.py` diffs two wire traces
+  and names the first divergence by its name in the book; `tools/barrier.py` predicts
+  from the sheets where a client will stop *before* it connects. A real vanilla client
+  has joined this server, and two independent runs of it are byte-ALIGNED.
 
 Not done, and not pretended otherwise:
 
 - **The port has almost no behaviour.** All 14,486 generated method bodies are
-  stubs, and the kernel implements the entry path only: accept, framing, `Hello`.
-  Everything after the handshake - serving the world, tile sending, the game loop -
-  is not written, so a client that reaches it is kicked by name instead of served.
-- **A world can be read, but not served.** `-world <path>` loads a real `.wld` and
-  reports it, and the container, the header and the tile section are checked
-  byte-exactly against two real worlds of different file versions. Nine of the
-  eleven sections are still unread (`chests`, `signs`, `NPCs`, `tile entities`,
-  `weighted pressure plates`, `town manager`, `bestiary`, `creative powers`,
-  `footer`), and the report names them rather than printing only its successes.
+  stubs. The kernel implements the entry path, the handshake, `SyncPlayer`, the
+  player-life sanitisation, the world file reader and the world transfer - and a
+  client that completes the join gets **terrain with no entities**, because the
+  messages the C# sends next are not sent. `barrier.py` names all six: items, NPCs,
+  projectiles, banners, creative powers, pylons. Anything past that is still kicked
+  by name rather than served.
+- **A world is read and the spawn is served.** `-world <path>` loads a real `.wld`
+  and the container, header and tile section are checked byte-exactly against two
+  real worlds of different file versions; the 15 sections around the spawn are
+  streamed from memory. Nine of the eleven world-file sections are still unread
+  (`chests`, `signs`, `NPCs`, `tile entities`, `weighted pressure plates`,
+  `town manager`, `bestiary`, `creative powers`, `footer`), so chests and signs ride
+  in the sections empty and the report names every one of them.
+- **One measured divergence from the native server.** Against
+  `TerrariaServer.exe` v1.4.5.8, the trace stops at frame 1: `PlayerInfo` is 4 bytes
+  on the native and 2 on the port. The C# writes 2, so the native's extra pair is
+  unexplained. It is reported as an open question with the bytes attached.
 - **Ghidra analysed the client only.** The server has no `functions`, `strings` or
   `types_pe` sheets (dec015, t0007), so nothing in this repository says what
   `TerrariaServer.exe`'s native surface looks like.
-- **No parity traces yet.** `re/traces/` is empty, so nothing here proves the port
-  behaves like the original - only that it has the original's shape. The entry path
-  is the one exception so far: it is written from the decompiled source and asserted
-  over a real socket by `kernel/net.rs`, but that is a test, not a recorded trace of
-  a real run.
+- **The tile compression is stored blocks, not real deflate.** Legal, and a client
+  cannot tell (it inflates identically), but the sections travel larger than the
+  native server's. There is no trace yet of a *whole session* - a join is recorded,
+  not gameplay.
 - **No client port.** Only the server is projected; the client is evidence only.
 - **One MDD preflight check is absent** (dead-column detection, check 26) because a
   generic emitter consumes every column, so the rule could only ever pass. It is
