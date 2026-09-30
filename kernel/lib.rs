@@ -49,6 +49,7 @@ pub mod sheets {
 pub mod args;
 pub mod boot;
 pub mod net;
+pub mod player;
 
 #[cfg(test)]
 mod tests {

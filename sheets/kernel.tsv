@@ -25,3 +25,4 @@ k0003	module	boot	done	-	mirrors Terraria.Program.LaunchGame as far as a stub po
 k0004	build	build	done	-	the MDD 5.6 emit shim: runs the pipeline, emits the port and the per-sheet modules, hash-gated
 k0005	module	net	done	-	the server's entry path, hand-written from the decompiled C#: accept, packet framing, the Hello handshake, the three state guards; inline socket tests
 k0006	test	tests::hostile	done	-	the hostile-input regression suite: real sockets, one bad client at a time, asserting the server is never tricked into serving and is still alive and accepting afterwards
+k0007	module	player	done	-	first slice of the `player` unit (rank 1 by measured workload): the field sanitisation the C# applies to SyncPlayer(4), the first message a client sends after PlayerInfo (MessageBuffer.cs:296-305); the skin bound is derived from the id table's own highest member rather than typed
