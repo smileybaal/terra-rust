@@ -49,9 +49,12 @@ re/
   ghidra_scripts/       extraction scripts (committed)
   traces/               parity traces; commit hashes only
 crates/
-  sheetty/              parser, schema checker, overlap engine, emitter
+  sheetty/              parser, schema checker, overlap engine, emitter (incl. the port projection)
   sheetty-cli/          `sheetty preflight | overlap | report | view`
-kernel/                 hand-written algorithmic code ONLY (listed in kernel.tsv)
+  terraria-demo/        proves the strut equation: sheets -> build.rs -> include!'d Rust
+  terraria-server/      the server binary: a thin shim, deliberately almost empty
+kernel/                 the hand-written Rust server: lib.rs, args.rs, boot.rs (listed in kernel.tsv)
+                        owns the GENERATED port it includes at build time from $OUT_DIR
 docs/generated/         projected docs, never hand-edited
 ```
 
@@ -79,6 +82,9 @@ cargo run -p sheetty-cli -- emit --out target/generated --verify-determinism
 cargo run -p sheetty-cli -- pack v_client_types          # assemble a view, check its budget
 cargo run -p sheetty-cli -- pack v_server_types --rows 1..900  # ad-hoc row window
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
+cargo build -p terraria-server             # the Rust server: generated shape + hand-written kernel
+cargo run -p terraria-server -- -savedirectory C:\saves
+cargo test -p terraria-kernel              # 16 tests over the port and the kernel
 powershell -File tools\test-preflight.ps1  # prove the rules actually fire
 powershell -File tools\test-truncation.ps1 # prove the truncation guard fires
 ```
@@ -112,15 +118,17 @@ emits the whole 125 MB assembly regardless of `-t`).
 | Item | Value |
 |---|---|
 | target | `Terraria.exe` (client) `960a03bf...`; `TerrariaServer.exe` (server) `328872c6...`; both PE32 i386 .NET CLI assemblies |
-| sheets | 22 (13 kernel/declaration + 7 client evidence + 4 server evidence + 2 shared) |
-| rows | 161,764 |
-| columns | 192 |
+| sheets | 24 (10 declaration/kernel + 8 client evidence + 5 server evidence + 2 shared, minus overlap) |
+| rows | 229,260 |
+| columns | 224 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
 | preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
 | rule tests | `tools/test-preflight.ps1` (8 diagnostics on a broken fixture), `tools/test-truncation.ps1` (truncation guard), `tools/test-rules-sweep.ps1` (31 codes) |
-| client evidence (ILSpy) | 1,549 types, 14,052 methods, 2,212 edges, 1,549 triage rows |
-| server evidence (ILSpy) | 1,551 types, 14,025 methods, 2,211 edges, 1,551 triage rows |
-| client vs server | 1,544 shared, 3 client-only, 5 server-only, 2 divergent |
+| client evidence (ILSpy) | 2,464 types, 14,517 methods, 3,602 edges, 30,057 members |
+| server evidence (ILSpy) | 2,463 types, 14,486 methods, 3,601 edges, 30,040 members |
+| client vs server | 2,456 shared, 6 client-only, 5 server-only, 2 divergent |
+| Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders, 64,040 lines |
+| Rust kernel (hand-written) | `kernel/{lib,args,boot}.rs`, all listed in `kernel.tsv`; 16 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 
@@ -167,6 +175,64 @@ overlap engine.
 
 Ghidra has only analysed the client, so the server has no `functions`,
 `strings` or `types_pe` sheets yet (dec015, t0007).
+
+## The Rust port
+
+`cargo build -p terraria-server` builds a Rust server whose shape is **generated**
+from the sheet book. It is not typed by hand and it is not checked in: `sheetty
+emit` writes it into `$OUT_DIR` on every build, so the sheets stay the only place
+the server's shape is written down (D1). If preflight fails, the port does not
+build at all (D5).
+
+A Rust item is a **join of three relations**, which is why no single sheet could
+project it:
+
+| sheet | becomes |
+|---|---|
+| `re/server/types` | the item: `struct`, `enum`, `trait` or delegate marker, in a module tree mirroring the namespace |
+| `re/server/fields` | the struct body, in **declaration order**, plus the `const`s and the enum discriminants |
+| `re/server/methods` | the `impl` body, one `fn` per row, with `ret` and `params` mapped to Rust types |
+
+The values are real, not placeholders: `ItemID::DirtBlock == 2` and
+`Netplay::DefaultPort == 7777` come from the C# source through ILSpy into a sheet
+row and out as a Rust constant, and the tests assert them. So does the negative
+discriminant on `AchievementCategory::None`.
+
+What the port is NOT: behaviour. Every generated body is `unimplemented!()`. It is
+the server's shape at a fidelity the sheets can prove, and `terraria-server` says
+so when it runs rather than printing a banner that implies it is serving:
+
+```
+$ cargo run -p terraria-server -- -savedirectory C:\saves
+the port knows:
+  listen port                  7777
+  max connections              256
+  first item id (DirtBlock)    2
+  types projected              2463
+NOT SERVING. This build is the projected SHAPE of the server.
+```
+
+Three things the projection does that are worth knowing, because each is a
+recorded decision rather than an accident:
+
+- **Unresolved references become visible placeholders.** 504 names are
+  referenced by the server but not declared in it - the BCL, XNA, `IntPtr` - and
+  each becomes a generated marker in `port::externs`. The port therefore always
+  compiles, and the size of the not-yet-ported surface is a number rather than a
+  silence.
+- **Size cycles are broken by boxing exactly one edge.** A field whose type is its
+  own struct, or the edge that closes a cycle, is boxed; the edge is chosen by a
+  DFS over the field graph, so the other 2,400 types stay plain. C# class fields
+  *are* references, so for those the `Box` is what the original means.
+- **A constant we cannot state exactly is omitted, not approximated.** `1f / 60.0`
+  is an expression; it is left out rather than guessed at, because a plausible
+  wrong number in an ID table is worse than a missing one.
+
+`kernel/` is the hand-written half: `args.rs` mirrors `Utils.ParseArguements`
+(with one recorded divergence, dec020), and `boot.rs` mirrors
+`Program.LaunchGame` as far as a stub port allows. Both are listed in
+`sheets/kernel.tsv`, because D4 allows exactly two kinds of file: rows, and listed
+kernel modules.
 
 ## What Ghidra actually produced here (read this before trusting the sheets)
 
