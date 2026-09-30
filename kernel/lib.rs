@@ -51,6 +51,7 @@ pub mod boot;
 pub mod net;
 pub mod player;
 pub mod tiles;
+pub mod worlddata;
 pub mod worldfile;
 
 #[cfg(test)]

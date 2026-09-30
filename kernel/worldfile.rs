@@ -105,6 +105,172 @@ pub struct WorldHeader {
     pub rock_layer: f64,
 }
 
+/// The rest of the world's flag section, i.e. the part of `WorldFile.cs:1986`
+/// `LoadWorldFlags` that `read_header` does not already return.
+///
+/// The split is not arbitrary: `read_header` ends at `rock_layer` (`WorldFile.cs:2076`),
+/// which is the last field the container's `positions[0]` pointer needs in order to be
+/// checked. Everything after it is still part of the SAME flat record, so it cannot be
+/// skipped - each field is read to advance the stream - and `WorldData`(7) sends almost
+/// every one of them to the client. A world whose surface is right but whose dungeon
+/// position is invented puts the client's dungeon in the wrong place.
+///
+/// Where the C# keeps a value in a `_tempX` static and applies it after the whole record
+/// is read, this stores the temp under the name the file uses and lets the caller apply
+/// it, rather than applying it here and losing the distinction.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WorldFlags {
+    // -- clock and sky -------------------------------------------------------
+    /// `_tempTime`. A `double` in the file, cast to `int` for the wire.
+    pub time: f64,
+    pub day_time: bool,
+    /// `_tempMoonPhase`. An `int` in the file, sent as a byte.
+    pub moon_phase: i32,
+    pub blood_moon: bool,
+    pub eclipse: bool,
+    // -- dungeon -------------------------------------------------------------
+    pub dungeon_x: i32,
+    pub dungeon_y: i32,
+    /// `WorldGen.crimson`: whether the world generated crimson instead of corruption.
+    pub crimson: bool,
+    // -- progress ------------------------------------------------------------
+    pub downed_boss1: bool,
+    pub downed_boss2: bool,
+    pub downed_boss3: bool,
+    pub downed_queen_bee: bool,
+    pub downed_mech_boss1: bool,
+    pub downed_mech_boss2: bool,
+    pub downed_mech_boss3: bool,
+    pub downed_mech_boss_any: bool,
+    pub downed_plant_boss: bool,
+    pub downed_golem_boss: bool,
+    pub downed_slime_king: bool,
+    pub downed_goblins: bool,
+    pub downed_clown: bool,
+    pub downed_frost: bool,
+    pub downed_pirates: bool,
+    pub downed_fishron: bool,
+    pub downed_martians: bool,
+    pub downed_ancient_cultist: bool,
+    pub downed_moonlord: bool,
+    pub downed_halloween_king: bool,
+    pub downed_halloween_tree: bool,
+    pub downed_christmas_ice_queen: bool,
+    pub downed_christmas_santank: bool,
+    pub downed_christmas_tree: bool,
+    pub downed_tower_solar: bool,
+    pub downed_tower_vortex: bool,
+    pub downed_tower_nebula: bool,
+    pub downed_tower_stardust: bool,
+    pub downed_empress_of_light: bool,
+    pub downed_queen_slime: bool,
+    pub downed_deerclops: bool,
+    pub saved_goblin: bool,
+    pub saved_wizard: bool,
+    pub saved_mech: bool,
+    pub saved_angler: bool,
+    pub saved_stylist: bool,
+    pub saved_tax_collector: bool,
+    pub saved_golfer: bool,
+    pub saved_bartender: bool,
+    /// `WorldGen.shadowOrbSmashed`.
+    pub shadow_orb_smashed: bool,
+    pub shadow_orb_count: u8,
+    pub altar_count: i32,
+    pub hard_mode: bool,
+    pub after_party_of_doom: bool,
+    // -- invasion ------------------------------------------------------------
+    pub invasion_delay: i32,
+    pub invasion_size: i32,
+    pub invasion_type: i32,
+    pub invasion_x: f64,
+    pub invasion_size_start: i32,
+    pub slime_rain_time: f64,
+    // -- weather -------------------------------------------------------------
+    pub raining: bool,
+    pub rain_time: i32,
+    pub max_rain: f32,
+    pub sandstorm_happening: bool,
+    pub sandstorm_time_left: i32,
+    pub sandstorm_severity: f32,
+    pub sandstorm_intended_severity: f32,
+    pub num_clouds: i16,
+    pub wind_speed_target: f32,
+    pub cloud_bg_active: i32,
+    // -- dials ---------------------------------------------------------------
+    pub sundial_cooldown: u8,
+    pub moondial_cooldown: u8,
+    // -- background styles ---------------------------------------------------
+    /// The 13 styles, indexed the way `WorldGen.setBG` indexes them: 0 is `treeBG1`,
+    /// 1..9 are the biome backgrounds, 10..12 are `treeBG2..4`. Stored in setBG order
+    /// and reordered only at the wire, where the message writes a different order.
+    pub bg: [u8; 13],
+    /// `WorldGen.TreeTops`: 13 variations, in `AreaId` order.
+    pub tree_tops: [i32; 13],
+    // -- ore ----------------------------------------------------------------
+    pub ore_copper: i32,
+    pub ore_iron: i32,
+    pub ore_silver: i32,
+    pub ore_gold: i32,
+    pub ore_cobalt: i32,
+    pub ore_mythril: i32,
+    pub ore_adamantite: i32,
+    // -- misc progress -------------------------------------------------------
+    pub angler_quest: i32,
+    pub cultist_delay: i32,
+    pub fast_forward_time_to_dawn: bool,
+    pub fast_forward_time_to_dusk: bool,
+    pub party_manual: bool,
+    pub party_genuine: bool,
+    pub party_cooldown: i32,
+    pub party_celebrating_npcs: Vec<i32>,
+    pub downed_invasion_t1: bool,
+    pub downed_invasion_t2: bool,
+    pub downed_invasion_t3: bool,
+    pub combat_book_was_used: bool,
+    pub combat_book_volume_two: bool,
+    pub peddlers_satchel: bool,
+    pub lantern_night_cooldown: i32,
+    pub lantern_night_genuine: bool,
+    pub lantern_night_manual: bool,
+    pub force_halloween_today: bool,
+    pub force_xmas_today: bool,
+    pub force_halloween_forever: bool,
+    pub force_xmas_forever: bool,
+    pub bought_cat: bool,
+    pub bought_dog: bool,
+    pub bought_bunny: bool,
+    pub unlocked_slime_blue_spawn: bool,
+    pub unlocked_slime_green_spawn: bool,
+    pub unlocked_slime_old_spawn: bool,
+    pub unlocked_slime_purple_spawn: bool,
+    pub unlocked_slime_rainbow_spawn: bool,
+    pub unlocked_slime_red_spawn: bool,
+    pub unlocked_slime_yellow_spawn: bool,
+    pub unlocked_slime_copper_spawn: bool,
+    pub unlocked_truffle_spawn: bool,
+    pub unlocked_merchant_spawn: bool,
+    pub unlocked_demolitionist_spawn: bool,
+    pub unlocked_party_girl_spawn: bool,
+    pub unlocked_dye_trader_spawn: bool,
+    pub unlocked_arms_dealer_spawn: bool,
+    pub unlocked_nurse_spawn: bool,
+    pub unlocked_princess_spawn: bool,
+    pub vampire_seed: bool,
+    pub infected_seed: bool,
+    pub team_based_spawns_seed: bool,
+    pub dual_dungeons_seed: bool,
+    pub more_lightning_seed: bool,
+    pub no_lightning_seed: bool,
+    /// `ExtraSpawnPointManager`: up to 255 points, each an x/y tile pair.
+    pub extra_spawn_points: Vec<(i16, i16)>,
+    /// `WorldGen.Manifest`, as the raw string. Empty before version 299, which stored
+    /// no manifest at all - not an empty one.
+    pub manifest: String,
+    /// The version this was read for, so a caller can tell `read_flags` refused a gate.
+    pub version: i32,
+}
+
 // -- primitive readers -------------------------------------------------------
 //
 // `&[u8]` implements `Read` and `read_exact` advances it, so the stream IS the slice
@@ -154,6 +320,10 @@ fn i64_of(r: &mut &[u8]) -> Result<i64, WorldFileError> {
 
 fn f64_of(r: &mut &[u8]) -> Result<f64, WorldFileError> {
     Ok(f64::from_le_bytes(take(r, 8)?.try_into().unwrap()))
+}
+
+fn f32_of(r: &mut &[u8]) -> Result<f32, WorldFileError> {
+    Ok(f32::from_le_bytes(take(r, 4)?.try_into().unwrap()))
 }
 
 fn string_of(r: &mut &[u8]) -> Result<String, WorldFileError> {
@@ -337,6 +507,348 @@ pub fn read_header(r: &mut &[u8], version: i32) -> Result<WorldHeader, WorldFile
     })
 }
 
+/// Walk the rest of the flag section (`WorldFile.cs:1986` `LoadWorldFlags`).
+///
+/// Call this with the stream positioned immediately after `rock_layer`, i.e. right after
+/// `read_header` has returned. The two together are one flat record; splitting them is a
+/// convenience for the container check, not a boundary in the file.
+///
+/// The C# RETURNS EARLY from this method on several old versions (95, 99, 101, 104, 109,
+/// 128, 131, 140). Those returns are reproduced, because a v90 world really does stop
+/// there and reading on would consume the next section's bytes as flags. That is why the
+/// result carries `version`.
+pub fn read_flags(r: &mut &[u8], version: i32) -> Result<WorldFlags, WorldFileError> {
+    let mut f = WorldFlags { version, ..Default::default() };
+
+    // -- clock, sky and dungeon ----------------------------------------------
+    f.time = f64_of(r)?;
+    f.day_time = bool_of(r)?;
+    f.moon_phase = i32_of(r)?;
+    f.blood_moon = bool_of(r)?;
+    f.eclipse = bool_of(r)?;
+    f.dungeon_x = i32_of(r)?;
+    f.dungeon_y = i32_of(r)?;
+    f.crimson = bool_of(r)?;
+
+    // -- boss progress -------------------------------------------------------
+    f.downed_boss1 = bool_of(r)?;
+    f.downed_boss2 = bool_of(r)?;
+    f.downed_boss3 = bool_of(r)?;
+    f.downed_queen_bee = bool_of(r)?;
+    f.downed_mech_boss1 = bool_of(r)?;
+    f.downed_mech_boss2 = bool_of(r)?;
+    f.downed_mech_boss3 = bool_of(r)?;
+    f.downed_mech_boss_any = bool_of(r)?;
+    f.downed_plant_boss = bool_of(r)?;
+    f.downed_golem_boss = bool_of(r)?;
+    f.downed_slime_king = if version >= 118 { bool_of(r)? } else { false };
+    f.saved_goblin = bool_of(r)?;
+    f.saved_wizard = bool_of(r)?;
+    f.saved_mech = bool_of(r)?;
+    f.downed_goblins = bool_of(r)?;
+    f.downed_clown = bool_of(r)?;
+    f.downed_frost = bool_of(r)?;
+    f.downed_pirates = bool_of(r)?;
+    f.shadow_orb_smashed = bool_of(r)?;
+    // `WorldGen.spawnMeteor` is read and not used by the world message, so it is read
+    // for the stream position and dropped rather than stored.
+    let _spawn_meteor = bool_of(r)?;
+    f.shadow_orb_count = u8_of(r)?;
+    f.altar_count = i32_of(r)?;
+    f.hard_mode = bool_of(r)?;
+    f.after_party_of_doom = if version >= 257 { bool_of(r)? } else { false };
+
+    // -- invasion ------------------------------------------------------------
+    f.invasion_delay = i32_of(r)?;
+    f.invasion_size = i32_of(r)?;
+    f.invasion_type = i32_of(r)?;
+    f.invasion_x = f64_of(r)?;
+    f.slime_rain_time = if version >= 118 { f64_of(r)? } else { 0.0 };
+    f.sundial_cooldown = if version >= 113 { u8_of(r)? } else { 0 };
+
+    // -- rain, before `FixEndlessRainWorlds` gets a chance to clear it ---------
+    f.raining = bool_of(r)?;
+    f.rain_time = i32_of(r)?;
+    f.max_rain = f32_of(r)?;
+    // `FixEndlessRainWorlds` (WorldFile.cs:3297) reads NOTHING: it clears the three
+    // fields above for a >317 world with an absurd rain timer and no rain secret seed.
+    // Reproducing it here would need the secret-seed list, so it is not applied; the
+    // three raw values are what the file holds.
+
+    // -- hardmode ore, then the first eight background styles ------------------
+    f.ore_cobalt = i32_of(r)?;
+    f.ore_mythril = i32_of(r)?;
+    f.ore_adamantite = i32_of(r)?;
+    for i in 0..8 {
+        f.bg[i] = u8_of(r)?;
+    }
+    f.cloud_bg_active = i32_of(r)?;
+    f.num_clouds = i16_of(r)?;
+    f.wind_speed_target = f32_of(r)?;
+
+    // -- the version-95 gate: everything below is absent in older files ---------
+    if version < 95 {
+        return Ok(f);
+    }
+    let angler_count = i32_of(r)?;
+    for _ in 0..angler_count.max(0) {
+        let _ = string_of(r)?;
+    }
+
+    if version < 99 {
+        return Ok(f);
+    }
+    f.saved_angler = bool_of(r)?;
+
+    if version < 101 {
+        return Ok(f);
+    }
+    f.angler_quest = i32_of(r)?;
+
+    if version < 104 {
+        return Ok(f);
+    }
+    f.saved_stylist = bool_of(r)?;
+    f.saved_tax_collector = if version >= 129 { bool_of(r)? } else { false };
+    f.saved_golfer = if version >= 201 { bool_of(r)? } else { false };
+    // Before 107 the C# invents an invasion start rather than reading one.
+    f.invasion_size_start = if version >= 107 { i32_of(r)? } else { 0 };
+    f.cultist_delay = if version < 108 { 86400 } else { i32_of(r)? };
+
+    if version < 109 {
+        return Ok(f);
+    }
+    // `BannerSystem.Load` (BannerSystem.cs:188) reads TWO counts: a count of int32 kill
+    // counts, and - from version 289 - a count of uint16 claimable banners. The SAVE side
+    // (`BannerSystem.Save`) always writes both halves, so the gate is in the READER: a
+    // pre-289 file simply has no second half. Reading only the first half is what left
+    // d.wld (version 326) 639 bytes short of its own tile section, and the first half
+    // alone parses cleanly, so nothing but the section pointer could have caught it.
+    let banner_count = i16_of(r)?;
+    for _ in 0..banner_count.max(0) {
+        let _ = i32_of(r)?;
+    }
+    if version >= 289 {
+        let claimable_count = i16_of(r)?;
+        for _ in 0..claimable_count.max(0) {
+            let _ = u16_of(r)?;
+        }
+    }
+
+    if version < 128 {
+        return Ok(f);
+    }
+    f.fast_forward_time_to_dawn = bool_of(r)?;
+
+    if version < 131 {
+        return Ok(f);
+    }
+    f.downed_fishron = bool_of(r)?;
+    f.downed_martians = bool_of(r)?;
+    f.downed_ancient_cultist = bool_of(r)?;
+    f.downed_moonlord = bool_of(r)?;
+    f.downed_halloween_king = bool_of(r)?;
+    f.downed_halloween_tree = bool_of(r)?;
+    f.downed_christmas_ice_queen = bool_of(r)?;
+    f.downed_christmas_santank = bool_of(r)?;
+    f.downed_christmas_tree = bool_of(r)?;
+
+    if version < 140 {
+        return Ok(f);
+    }
+    f.downed_tower_solar = bool_of(r)?;
+    f.downed_tower_vortex = bool_of(r)?;
+    f.downed_tower_nebula = bool_of(r)?;
+    f.downed_tower_stardust = bool_of(r)?;
+    // The four `TowerActive` flags and `LunarApocalypseIsUp` follow. They set shield
+    // strengths on load and are not sent, so they are read and dropped.
+    let _tower_active_solar = bool_of(r)?;
+    let _tower_active_vortex = bool_of(r)?;
+    let _tower_active_nebula = bool_of(r)?;
+    let _tower_active_stardust = bool_of(r)?;
+    let _lunar_apocalypse_is_up = bool_of(r)?;
+
+    if version < 170 {
+        f.party_manual = false;
+        f.party_genuine = false;
+        f.party_cooldown = 0;
+    } else {
+        f.party_manual = bool_of(r)?;
+        f.party_genuine = bool_of(r)?;
+        f.party_cooldown = i32_of(r)?;
+        let n = i32_of(r)?;
+        for _ in 0..n.max(0) {
+            f.party_celebrating_npcs.push(i32_of(r)?);
+        }
+    }
+
+    if version < 174 {
+        f.sandstorm_happening = false;
+        f.sandstorm_time_left = 0;
+        f.sandstorm_severity = 0.0;
+        f.sandstorm_intended_severity = 0.0;
+    } else {
+        f.sandstorm_happening = bool_of(r)?;
+        f.sandstorm_time_left = i32_of(r)?;
+        f.sandstorm_severity = f32_of(r)?;
+        f.sandstorm_intended_severity = f32_of(r)?;
+    }
+
+    // `DD2Event.Load` (DD2Event.cs:158): before 178 it resets progress and reads nothing.
+    if version < 178 {
+        f.saved_bartender = false;
+        f.downed_invasion_t1 = false;
+        f.downed_invasion_t2 = false;
+        f.downed_invasion_t3 = false;
+    } else {
+        f.saved_bartender = bool_of(r)?;
+        f.downed_invasion_t1 = bool_of(r)?;
+        f.downed_invasion_t2 = bool_of(r)?;
+        f.downed_invasion_t3 = bool_of(r)?;
+    }
+
+    // -- the last five background styles, each on its own gate ------------------
+    f.bg[8] = if version > 194 { u8_of(r)? } else { 0 };
+    f.bg[9] = if version >= 215 { u8_of(r)? } else { 0 };
+    if version > 195 {
+        f.bg[10] = u8_of(r)?;
+        f.bg[11] = u8_of(r)?;
+        f.bg[12] = u8_of(r)?;
+    } else {
+        // Before 196 the three tree backgrounds are the FIRST one, copied.
+        f.bg[10] = f.bg[0];
+        f.bg[11] = f.bg[0];
+        f.bg[12] = f.bg[0];
+    }
+
+    f.combat_book_was_used = if version >= 204 { bool_of(r)? } else { false };
+
+    if version < 207 {
+        f.lantern_night_cooldown = 0;
+        f.lantern_night_genuine = false;
+        f.lantern_night_manual = false;
+    } else {
+        f.lantern_night_cooldown = i32_of(r)?;
+        f.lantern_night_genuine = bool_of(r)?;
+        f.lantern_night_manual = bool_of(r)?;
+        let _next_night_is_genuine = bool_of(r)?;
+    }
+
+    // `TreeTopsInfo.Load` (TreeTopsInfo.cs:51): from 211 it reads a count then that many
+    // int32s, and it reads only the first 13 - a file claiming more would desynchronise
+    // the native server too, so the same limit is kept rather than being "fixed".
+    if version < 211 {
+        // Older files carry no tree tops: `CopyExistingWorldInfo` builds them from the
+        // styles. AreaId 0..3 are the four forest areas, which before 196 are all the
+        // FIRST tree background; 4..12 are the biome backgrounds.
+        f.tree_tops[0] = f.bg[10] as i32;
+        f.tree_tops[1] = f.bg[10] as i32;
+        f.tree_tops[2] = f.bg[10] as i32;
+        f.tree_tops[3] = f.bg[10] as i32;
+        f.tree_tops[4] = f.bg[1] as i32;
+        f.tree_tops[5] = f.bg[2] as i32;
+        f.tree_tops[6] = f.bg[3] as i32;
+        f.tree_tops[7] = f.bg[4] as i32;
+        f.tree_tops[8] = f.bg[5] as i32;
+        f.tree_tops[9] = f.bg[6] as i32;
+        f.tree_tops[10] = f.bg[7] as i32;
+        f.tree_tops[11] = f.bg[8] as i32;
+        f.tree_tops[12] = f.bg[9] as i32;
+    } else {
+        let n = i32_of(r)?;
+        for i in 0..n.max(0).min(13) as usize {
+            f.tree_tops[i] = i32_of(r)?;
+        }
+    }
+
+    if version >= 212 {
+        f.force_halloween_today = bool_of(r)?;
+        f.force_xmas_today = bool_of(r)?;
+    }
+    if version >= 216 {
+        f.ore_copper = i32_of(r)?;
+        f.ore_iron = i32_of(r)?;
+        f.ore_silver = i32_of(r)?;
+        f.ore_gold = i32_of(r)?;
+    } else {
+        f.ore_copper = -1;
+        f.ore_iron = -1;
+        f.ore_silver = -1;
+        f.ore_gold = -1;
+    }
+    if version >= 217 {
+        f.bought_cat = bool_of(r)?;
+        f.bought_dog = bool_of(r)?;
+        f.bought_bunny = bool_of(r)?;
+    }
+    if version >= 223 {
+        f.downed_empress_of_light = bool_of(r)?;
+        f.downed_queen_slime = bool_of(r)?;
+    }
+    f.downed_deerclops = if version >= 240 { bool_of(r)? } else { false };
+    f.unlocked_slime_blue_spawn = if version >= 250 { bool_of(r)? } else { false };
+    if version >= 251 {
+        f.unlocked_merchant_spawn = bool_of(r)?;
+        f.unlocked_demolitionist_spawn = bool_of(r)?;
+        f.unlocked_party_girl_spawn = bool_of(r)?;
+        f.unlocked_dye_trader_spawn = bool_of(r)?;
+        f.unlocked_truffle_spawn = bool_of(r)?;
+        f.unlocked_arms_dealer_spawn = bool_of(r)?;
+        f.unlocked_nurse_spawn = bool_of(r)?;
+        f.unlocked_princess_spawn = bool_of(r)?;
+    }
+    f.combat_book_volume_two = if version >= 259 { bool_of(r)? } else { false };
+    f.peddlers_satchel = if version >= 260 { bool_of(r)? } else { false };
+    if version >= 261 {
+        f.unlocked_slime_green_spawn = bool_of(r)?;
+        f.unlocked_slime_old_spawn = bool_of(r)?;
+        f.unlocked_slime_purple_spawn = bool_of(r)?;
+        f.unlocked_slime_rainbow_spawn = bool_of(r)?;
+        f.unlocked_slime_red_spawn = bool_of(r)?;
+        f.unlocked_slime_yellow_spawn = bool_of(r)?;
+        f.unlocked_slime_copper_spawn = bool_of(r)?;
+    }
+    if version >= 264 {
+        f.fast_forward_time_to_dusk = bool_of(r)?;
+        f.moondial_cooldown = u8_of(r)?;
+    }
+    if version >= 287 {
+        f.force_halloween_forever = bool_of(r)?;
+        f.force_xmas_forever = bool_of(r)?;
+    }
+    f.vampire_seed = if version >= 288 { bool_of(r)? } else { false };
+    f.infected_seed = if version >= 296 { bool_of(r)? } else { false };
+    if version >= 291 {
+        let _meteor_shower_count = i32_of(r)?;
+        let _coin_rain = i32_of(r)?;
+    }
+    if version >= 297 {
+        f.team_based_spawns_seed = bool_of(r)?;
+        // `ExtraSpawnPointManager.Read` (ExtraSpawnPointManager.cs:437): a byte count,
+        // then that many x/y int16 pairs. The `networking` flag changes nothing here.
+        let n = u8_of(r)?;
+        for _ in 0..n {
+            let x = i16_of(r)?;
+            let y = i16_of(r)?;
+            f.extra_spawn_points.push((x, y));
+        }
+    }
+    // `version >= 304 && reader.ReadBoolean()`: the `&&` SHORT-CIRCUITS, so an older file
+    // has no byte here at all. Reading unconditionally would eat the next field.
+    f.dual_dungeons_seed = version >= 304 && bool_of(r)?;
+    f.more_lightning_seed = version >= 323 && bool_of(r)?;
+    f.no_lightning_seed = version >= 323 && bool_of(r)?;
+
+    // A 299..312 file carried four bytes nothing reads. It is not padding: the C# reads
+    // them to move the stream, and skipping the read desynchronises the manifest.
+    if version >= 299 && version < 313 {
+        let _ = u32_of(r)?;
+    }
+    f.manifest = if version < 299 { String::new() } else { string_of(r)? };
+
+    Ok(f)
+}
+
 /// The world sizes the interactive world-select offers (`Main.cs:5473-5483`).
 pub const VALID_WORLD_SIZES: [(i32, i32); 3] = [(4200, 1200), (6400, 1800), (8400, 2400)];
 
@@ -377,6 +889,8 @@ pub enum LoadError {
     Container(WorldFileError),
     /// The header could not be read.
     Header(WorldFileError),
+    /// The flag section could not be read.
+    Flags(WorldFileError),
     /// The tile section could not be decoded.
     Tiles(crate::tiles::TileError),
     /// A section pointer is negative, out of order, or past the end of the file.
@@ -388,6 +902,8 @@ pub enum LoadError {
 pub struct LoadedWorld {
     pub container: Container,
     pub header: WorldHeader,
+    /// The rest of the header's own record, i.e. the flag section.
+    pub flags: WorldFlags,
     pub tile_stats: crate::tiles::TileStats,
     pub sections: Vec<Section>,
 }
@@ -423,6 +939,8 @@ pub fn load_world(data: &[u8]) -> Result<LoadedWorld, LoadError> {
     }
     let mut r = &data[header_start..];
     let header = read_header(&mut r, container.version).map_err(LoadError::Header)?;
+    // Immediately after the header, on the SAME stream: the two are one record.
+    let flags = read_flags(&mut r, container.version).map_err(LoadError::Flags)?;
 
     // The tile section is the span from positions[1] to positions[2]; the C# refuses to
     // continue unless the decode ends exactly on the latter.
@@ -464,7 +982,7 @@ pub fn load_world(data: &[u8]) -> Result<LoadedWorld, LoadError> {
         })
         .collect();
 
-    Ok(LoadedWorld { container, header, tile_stats, sections })
+    Ok(LoadedWorld { container, header, flags, tile_stats, sections })
 }
 
 #[cfg(test)]
@@ -579,9 +1097,37 @@ mod tests {
         // approximated.
         let mut r = &data[c.positions[0] as usize..];
         let h = read_header(&mut r, c.version).expect("the header parses");
+        let f = read_flags(&mut r, c.version).expect("the flag section parses");
+
+        // The exact check, and the one that makes the flag walk verifiable at all: the
+        // header and the flags are ONE record, and `positions[1]` is where it ends. Every
+        // field of the flag section is read only to advance the stream, so a single
+        // wrong width or a missed version gate lands the cursor somewhere else and this
+        // fails. Nothing weaker would catch a one-byte drift.
+        assert_eq!(
+            data.len() - r.len(),
+            c.positions[1] as usize,
+            "{}: header+flags must end exactly on positions[1]",
+            path.display()
+        );
 
         assert!(!h.name.is_empty(), "a world has a name");
         assert!(h.name.is_ascii(), "world names are ascii in practice: {:?}", h.name);
+        // The flags are not just walked: the values they yield have to be sane, or the
+        // walk landed on the right byte with the wrong interpretation.
+        assert_eq!(f.version, c.version);
+        assert!(
+            f.dungeon_x > 0 && f.dungeon_x < h.max_tiles_x && f.dungeon_y > 0 && f.dungeon_y < h.max_tiles_y,
+            "{}: the dungeon ({}, {}) sits inside the world",
+            path.display(),
+            f.dungeon_x,
+            f.dungeon_y
+        );
+        assert!(
+            f.ore_copper == -1 || f.ore_copper > 0,
+            "an ore tier is either unset (-1) or a real tile id, not {}",
+            f.ore_copper
+        );
         assert!(h.max_tiles_x > 0 && h.max_tiles_y > 0);
         assert!(
             VALID_WORLD_SIZES.contains(&(h.max_tiles_x, h.max_tiles_y)),
