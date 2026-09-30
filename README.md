@@ -101,6 +101,7 @@ python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
 python tools\ps.py tools\test-truncation.ps1 # prove the truncation guard fires
 python tools\ps.py tools\test-rules-sweep.ps1# prove all 31 diagnostic codes fire
 python tools\verify-managed-sheets.py      # cross-sheet invariants over the managed evidence
+python tools\check-readme-numbers.py       # re-derive the figures tabulated above, or fail
 ```
 
 `preflight` states its own coverage, because "preflight passed" must never be
