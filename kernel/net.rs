@@ -137,7 +137,7 @@ fn read_7bit_len<R: Read>(r: &mut R) -> io::Result<usize> {
 /// resource vector the C# does not have: its `BinaryReader` reads from a buffer it
 /// already holds and grows its own string as it goes. So the claim is checked against
 /// the frame bound and the bytes are read in bounded chunks.
-fn read_string<R: Read>(r: &mut R) -> io::Result<String> {
+pub(crate) fn read_string<R: Read>(r: &mut R) -> io::Result<String> {
     let len = read_7bit_len(r)?;
     if len > MAX_STRING {
         return Err(io::Error::new(

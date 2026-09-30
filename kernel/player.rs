@@ -9,7 +9,7 @@
 //! sent, and the generated `Player` struct would hold it happily, because a
 //! projected shape has no opinions - the clamps are behaviour, so they live here.
 
-use std::io::{self, Write};
+use std::io::{self, Cursor, Read, Write};
 
 use crate::port::terraria::id::PlayerVariantID;
 
@@ -266,7 +266,11 @@ pub struct SyncPlayer<'a> {
     pub voice_pitch_offset: f32,
     pub haircut: i32,
     pub name: &'a str,
-    pub hair_dye: &'a str,
+    /// A `byte`, not a string. `terraria.player.hairdye` is type `byte`, and the reader
+    /// uses `ReadByte()` (`MessageBuffer.cs:311`) where this writer uses
+    /// `writer.Write(player6.hairDye)` - the same single byte, because the field is one.
+    /// Writing a string here (as this file first did) shifts every field after it.
+    pub hair_dye: u8,
     pub hide_visible_accessory: &'a [bool],
     pub hide_misc: u8,
     /// hair, skin, eye, shirt, underShirt, pants, shoe - in that order.
@@ -297,7 +301,7 @@ pub fn write_sync_player<W: Write>(w: &mut W, p: &SyncPlayer<'_>) -> io::Result<
     w.write_all(&p.voice_pitch_offset.to_le_bytes())?;
     w.write_all(&[p.haircut as u8])?;
     crate::net::write_string(w, p.name)?;
-    crate::net::write_string(w, p.hair_dye)?;
+    w.write_all(&[p.hair_dye])?;
     w.write_all(&accessory_visibility(p.hide_visible_accessory).to_le_bytes())?;
     w.write_all(&[p.hide_misc])?;
     for (r, g, b) in p.colors {
@@ -347,6 +351,201 @@ pub fn write_sync_player<W: Write>(w: &mut W, p: &SyncPlayer<'_>) -> io::Result<
     }
     w.write_all(&[crystal])?;
     Ok(())
+}
+
+/// `MessageBuffer.cs:307`: `if (player18.hair >= 228) player18.hair = 0;`
+///
+/// A literal in the C#, so it is cited. An out-of-range haircut becomes the first one
+/// rather than being clamped to the last, which is what makes it worth naming.
+pub const MAX_HAIR: i32 = 228;
+
+/// `Player.cs:1437`: `public static int nameLen = 20`.
+///
+/// A plain `static`, not a `readonly` one, so its row carries no value and there is
+/// nothing to project; it is cited from the declaration.
+pub const NAME_LEN: usize = 20;
+
+/// The wire carries the accessory-visibility flags as a `ushort`, so sixteen is what
+/// the message can express (`NetMessage.cs:1905`).
+pub const ACCESSORY_SLOTS: usize = 16;
+
+/// `MessageBuffer.cs:305-306`: the pitch a client sent, made safe.
+///
+/// The READ side does more than the write side: it replaces NaN with zero and then
+/// clamps into -1..1. The writer stores the float verbatim, so the range rule exists
+/// only here, which is why `sanitise_voice_pitch` (NaN only) is not enough on its own.
+pub fn clamp_received_pitch(f: f32) -> f32 {
+    sanitise_voice_pitch(f).clamp(-1.0, 1.0)
+}
+
+/// `MessageBuffer.cs:307-310`: an out-of-range haircut becomes 0, not the maximum.
+pub fn sanitise_hair(hair: i32) -> i32 {
+    if hair >= MAX_HAIR {
+        0
+    } else {
+        hair
+    }
+}
+
+/// `MessageBuffer.cs:320-337`: decode the difficulty byte.
+///
+/// The C# tests the bits in order 0, 1, then 3, each ASSIGNING, so the last one set
+/// wins - and `extraAccessory` is bit 2. Normal is the absence of all three. The
+/// `difficulty > 3` guard that follows in the C# cannot fire, because no path assigns
+/// more than 3; it is not reproduced, and this comment is why.
+pub fn difficulty_from_bits(bits: u8) -> i32 {
+    let mut difficulty = 0;
+    if bits & (1 << 0) != 0 {
+        difficulty = 1;
+    }
+    if bits & (1 << 1) != 0 {
+        difficulty = 2;
+    }
+    if bits & (1 << 3) != 0 {
+        difficulty = 3;
+    }
+    difficulty
+}
+
+/// `MessageBuffer.cs:1905` read back: one bit per accessory slot.
+pub fn read_accessory_visibility(bits: u16) -> [bool; ACCESSORY_SLOTS] {
+    let mut out = [false; ACCESSORY_SLOTS];
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = bits & (1 << i) != 0;
+    }
+    out
+}
+
+/// Why a `SyncPlayer` body was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncPlayerError {
+    /// The body ended before the message did.
+    TooShort,
+    /// `Net.NameTooLong` (`MessageBuffer.cs:377`).
+    NameTooLong,
+    /// `Net.EmptyName` (`MessageBuffer.cs:381`).
+    EmptyName,
+}
+
+/// A `SyncPlayer` (4) body after the server has sanitised it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyncPlayerRead {
+    pub slot: u8,
+    pub skin_variant: i32,
+    pub voice_variant: i32,
+    pub voice_pitch_offset: f32,
+    pub haircut: i32,
+    pub name: String,
+    pub hair_dye: u8,
+    pub hide_visible_accessory: [bool; ACCESSORY_SLOTS],
+    pub hide_misc: u8,
+    pub colors: [(u8, u8, u8); 7],
+    pub difficulty: i32,
+    pub extra_accessory: bool,
+    pub using_biome_torches: bool,
+    pub happy_fun_torch_time: bool,
+    pub unlocked_biome_torches: bool,
+    pub unlocked_super_cart: bool,
+    pub enabled_super_cart: bool,
+    pub used_aegis_crystal: bool,
+    pub used_aegis_fruit: bool,
+    pub used_arcane_crystal: bool,
+    pub used_galaxy_pearl: bool,
+    pub used_gummy_worm: bool,
+    pub used_ambrosia: bool,
+    pub ate_artisan_bread: bool,
+}
+
+fn take_u8(c: &mut Cursor<&[u8]>) -> Result<u8, SyncPlayerError> {
+    let mut b = [0u8; 1];
+    c.read_exact(&mut b).map_err(|_| SyncPlayerError::TooShort)?;
+    Ok(b[0])
+}
+
+fn take_u16(c: &mut Cursor<&[u8]>) -> Result<u16, SyncPlayerError> {
+    let mut b = [0u8; 2];
+    c.read_exact(&mut b).map_err(|_| SyncPlayerError::TooShort)?;
+    Ok(u16::from_le_bytes(b))
+}
+
+fn take_f32(c: &mut Cursor<&[u8]>) -> Result<f32, SyncPlayerError> {
+    let mut b = [0u8; 4];
+    c.read_exact(&mut b).map_err(|_| SyncPlayerError::TooShort)?;
+    Ok(f32::from_le_bytes(b))
+}
+
+/// Read a `SyncPlayer` (4) body: `MessageBuffer.cs:284-400`.
+///
+/// Every field rule the C# applies is applied here, and the reader is the stricter
+/// half - it clamps the skin and voice, replaces a NaN pitch AND clamps it to -1..1,
+/// sends a haircut at or past `MAX_HAIR` to zero, and trims the name.
+///
+/// The C# then does two checks that need state this function does not have, so they
+/// are left to the caller: a duplicate name against the other connected players (kick
+/// `Lang.mp[5]`, `MessageBuffer.cs:359-370`) and a difficulty/world mismatch
+/// (`Net.PlayerIsCreativeAndWorldIsNotCreative` and its converse, `:385-393`).
+///
+/// `slot` is returned as the wire carried it. On the server the C# DISCARDS it and uses
+/// the connection's own slot (`if (Main.netMode == 2) num188 = whoAmI;`), so a caller
+/// must do the same - the field is not trusted.
+pub fn read_sync_player(body: &[u8]) -> Result<SyncPlayerRead, SyncPlayerError> {
+    let mut c = Cursor::new(body);
+    let slot = take_u8(&mut c)?;
+    let skin_variant = clamp_skin_variant(take_u8(&mut c)? as i32);
+    let voice_variant = clamp_voice_variant(take_u8(&mut c)? as i32);
+    let voice_pitch_offset = clamp_received_pitch(take_f32(&mut c)?);
+    let haircut = sanitise_hair(take_u8(&mut c)? as i32);
+    let name = crate::net::read_string(&mut c)
+        .map_err(|_| SyncPlayerError::TooShort)?
+        .trim()
+        .to_string();
+    let hair_dye = take_u8(&mut c)?;
+    let hide_visible_accessory = read_accessory_visibility(take_u16(&mut c)?);
+    let hide_misc = take_u8(&mut c)?;
+    let mut colors = [(0u8, 0u8, 0u8); 7];
+    for color in colors.iter_mut() {
+        *color = (take_u8(&mut c)?, take_u8(&mut c)?, take_u8(&mut c)?);
+    }
+    let difficulty_byte = take_u8(&mut c)?;
+    let difficulty = difficulty_from_bits(difficulty_byte);
+    let extra_accessory = difficulty_byte & (1 << 2) != 0;
+    let biome = take_u8(&mut c)?;
+    let crystal = take_u8(&mut c)?;
+
+    // `MessageBuffer.cs:377-384`: length first, then emptiness.
+    if name.len() > NAME_LEN {
+        return Err(SyncPlayerError::NameTooLong);
+    }
+    if name.is_empty() {
+        return Err(SyncPlayerError::EmptyName);
+    }
+
+    Ok(SyncPlayerRead {
+        slot,
+        skin_variant,
+        voice_variant,
+        voice_pitch_offset,
+        haircut,
+        name,
+        hair_dye,
+        hide_visible_accessory,
+        hide_misc,
+        colors,
+        difficulty,
+        extra_accessory,
+        using_biome_torches: biome & (1 << 0) != 0,
+        happy_fun_torch_time: biome & (1 << 1) != 0,
+        unlocked_biome_torches: biome & (1 << 2) != 0,
+        unlocked_super_cart: biome & (1 << 3) != 0,
+        enabled_super_cart: biome & (1 << 4) != 0,
+        used_aegis_crystal: crystal & (1 << 0) != 0,
+        used_aegis_fruit: crystal & (1 << 1) != 0,
+        used_arcane_crystal: crystal & (1 << 2) != 0,
+        used_galaxy_pearl: crystal & (1 << 3) != 0,
+        used_gummy_worm: crystal & (1 << 4) != 0,
+        used_ambrosia: crystal & (1 << 5) != 0,
+        ate_artisan_bread: crystal & (1 << 6) != 0,
+    })
 }
 
 #[cfg(test)]
@@ -573,7 +772,7 @@ mod tests {
             voice_pitch_offset: 0.5,
             haircut: 3,
             name: "Bob",
-            hair_dye: "",
+            hair_dye: 5,
             hide_visible_accessory: &[true, false, false, true],
             hide_misc: 0,
             colors: [
@@ -602,20 +801,21 @@ mod tests {
         }
     }
 
-    /// The strongest test available without a client: the exact bytes.
-    #[test]
-    fn sync_player_writes_the_c_sharp_layout() {
-        let mut out = Vec::new();
-        write_sync_player(&mut out, &sample()).unwrap();
-        #[rustfmt::skip]
-        let expected: Vec<u8> = vec![
+    /// The exact bytes of `SyncPlayer` (4) for `sample()`, transcribed from
+    /// `NetMessage.cs:156-206`. Both the writer test and the reader test use THIS, so
+    /// the two halves are pinned to one vector rather than to each other: a round trip
+    /// would agree with itself even when both sides share a mistake, which is exactly
+    /// how the hairDye field was written as a string by mistake earlier in this file.
+    #[rustfmt::skip]
+    fn golden() -> Vec<u8> {
+        vec![
             0,                                  // slot
             11,                                 // skinVariant
             2,                                  // voiceVariant
             0x00, 0x00, 0x00, 0x3F,             // voicePitchOffset 0.5f, little-endian
             3,                                  // hair
             3, b'B', b'o', b'b',                // name: 7-bit length, then UTF-8
-            0,                                  // hairDye: empty string
+            5,                                  // hairDye: ONE byte, not a string
             0x09, 0x00,                         // accessory visibility: bits 0 and 3
             0,                                  // hideMisc
             1, 2, 3,                            // hairColor
@@ -628,9 +828,124 @@ mod tests {
             0x0C,                               // difficulty: Journey = bit 3, plus extraAccessory bit 2
             0x15,                               // biome torches: bits 0, 2 and 4
             0x41,                               // crystals: AegisCrystal bit 0, ArtisanBread bit 6
-        ];
-        assert_eq!(out, expected);
+        ]
+    }
+
+    /// The strongest write-side test available without a client: the exact bytes.
+    #[test]
+    fn sync_player_writes_the_c_sharp_layout() {
+        let mut out = Vec::new();
+        write_sync_player(&mut out, &sample()).unwrap();
+        assert_eq!(out, golden());
         assert_eq!(out.len(), 3 + 4 + 1 + 4 + 1 + 2 + 1 + 21 + 3);
+    }
+
+    /// The reader, on the same bytes the writer must produce.
+    #[test]
+    fn sync_player_reads_the_c_sharp_layout() {
+        let p = read_sync_player(&golden()).expect("the golden bytes must parse");
+        assert_eq!(p.slot, 0);
+        assert_eq!(p.skin_variant, 11);
+        assert_eq!(p.voice_variant, 2);
+        assert_eq!(p.voice_pitch_offset, 0.5);
+        assert_eq!(p.haircut, 3);
+        assert_eq!(p.name, "Bob");
+        assert_eq!(p.hair_dye, 5, "one byte, read as a byte");
+        assert!(p.hide_visible_accessory[0], "bit 0 is set");
+        assert!(!p.hide_visible_accessory[1]);
+        assert!(!p.hide_visible_accessory[2]);
+        assert!(p.hide_visible_accessory[3]);
+        assert_eq!(p.hide_misc, 0);
+        assert_eq!(p.colors[0], (1, 2, 3));
+        assert_eq!(p.colors[6], (19, 20, 21));
+        assert_eq!(p.difficulty, 3, "Journey is bit 3");
+        assert!(p.extra_accessory, "bit 2");
+        assert!(p.using_biome_torches);
+        assert!(!p.happy_fun_torch_time);
+        assert!(p.unlocked_biome_torches);
+        assert!(!p.unlocked_super_cart);
+        assert!(p.enabled_super_cart);
+        assert!(p.used_aegis_crystal);
+        assert!(!p.used_aegis_fruit);
+        assert!(!p.used_ambrosia);
+        assert!(p.ate_artisan_bread);
+    }
+
+    /// Round trip: what the writer produced, the reader accepts, field for field.
+    #[test]
+    fn sync_player_survives_a_round_trip() {
+        let mut out = Vec::new();
+        let sent = sample();
+        write_sync_player(&mut out, &sent).unwrap();
+        let got = read_sync_player(&out).unwrap();
+        assert_eq!(got.skin_variant, sent.skin_variant as i32);
+        assert_eq!(got.voice_variant, sent.voice_variant as i32);
+        assert_eq!(got.voice_pitch_offset, sent.voice_pitch_offset);
+        assert_eq!(got.haircut, sent.haircut as i32);
+        assert_eq!(got.name, sent.name);
+        assert_eq!(got.hair_dye, sent.hair_dye);
+        assert_eq!(got.colors, sent.colors);
+        assert_eq!(got.difficulty, sent.difficulty);
+        assert_eq!(got.extra_accessory, sent.extra_accessory);
+        assert_eq!(got.hide_visible_accessory[0], sent.hide_visible_accessory[0]);
+        assert_eq!(got.hide_visible_accessory[3], sent.hide_visible_accessory[3]);
+    }
+
+    /// Everything a client could lie about, sanitised on the way in.
+    #[test]
+    fn the_reader_is_stricter_than_the_writer() {
+        let mut bytes = golden();
+        // Offsets into the golden vector: 0 slot, 1 skin, 2 voice, 3..7 pitch, 7 hair.
+        bytes[1] = 255; // skinVariant, out of range
+        bytes[2] = 0; // voiceVariant, below the minimum of 1
+        bytes[3..7].copy_from_slice(&f32::NAN.to_le_bytes()); // pitch: NaN
+        bytes[7] = 228; // hair, at the limit
+        let p = read_sync_player(&bytes).unwrap();
+        assert_eq!(p.skin_variant, MAX_SKIN_VARIANT, "clamped to the id table's highest");
+        assert_eq!(p.voice_variant, 1, "raised to the minimum");
+        assert_eq!(p.voice_pitch_offset, 0.0, "a NaN pitch becomes zero");
+        assert!(p.voice_pitch_offset.is_sign_positive());
+        assert_eq!(p.haircut, 0, "at or past MAX_HAIR becomes 0, not the maximum");
+
+        // A pitch outside the range is clamped on the way in.
+        assert_eq!(clamp_received_pitch(5.0), 1.0);
+        assert_eq!(clamp_received_pitch(-5.0), -1.0);
+        assert_eq!(clamp_received_pitch(0.25), 0.25);
+        assert_eq!(clamp_received_pitch(f32::NAN), 0.0);
+    }
+
+    /// Names the C# refuses, and a truncated body.
+    #[test]
+    fn the_reader_refuses_bad_names_and_short_bodies() {
+        let long = "x".repeat(NAME_LEN + 1);
+        let mut bytes = Vec::new();
+        let mut p = sample();
+        p.name = &long;
+        write_sync_player(&mut bytes, &p).unwrap();
+        assert_eq!(read_sync_player(&bytes), Err(SyncPlayerError::NameTooLong));
+
+        // Exactly the limit is allowed.
+        let at_limit = "x".repeat(NAME_LEN);
+        let mut bytes = Vec::new();
+        p.name = &at_limit;
+        write_sync_player(&mut bytes, &p).unwrap();
+        assert_eq!(read_sync_player(&bytes).unwrap().name.len(), NAME_LEN);
+
+        // Whitespace is trimmed, and a name of only whitespace is empty.
+        let mut bytes = Vec::new();
+        p.name = "  Bob  ";
+        write_sync_player(&mut bytes, &p).unwrap();
+        assert_eq!(read_sync_player(&bytes).unwrap().name, "Bob");
+
+        let mut bytes = Vec::new();
+        p.name = "   ";
+        write_sync_player(&mut bytes, &p).unwrap();
+        assert_eq!(read_sync_player(&bytes), Err(SyncPlayerError::EmptyName));
+
+        // A body that stops early is TooShort, never a partial player.
+        assert_eq!(read_sync_player(&[]), Err(SyncPlayerError::TooShort));
+        assert_eq!(read_sync_player(&golden()[..10]), Err(SyncPlayerError::TooShort));
+        assert_eq!(read_sync_player(&golden()[..39]), Err(SyncPlayerError::TooShort));
     }
 
     /// Journey is bit 3, not bit 2, and Normal sets nothing.
