@@ -88,4 +88,49 @@ mod tests {
         assert!(core::mem::size_of::<port::terraria::Player>() > 0);
         assert!(core::mem::size_of::<port::terraria::Netplay>() > 0);
     }
+
+    /// A row that carries NO value must not be quietly hardcoded instead.
+    ///
+    /// `terraria.netplay.serverpassword` is a real row, but the extractor left its value
+    /// as `-` and its status as `todo`, so the projection gives `Netplay::ServerPassword`
+    /// a FIELD and no constant, and the port's "no password by default" is cited from the
+    /// C# (`Netplay.cs:38`) rather than dressed up as projected. That is the honest state
+    /// of the book, and this test is here to FAIL the day it stops being true: the moment
+    /// the extractor records a value, `""` becomes a stale hardcode and the fix is to read
+    /// the projected constant. A check that cannot fire is not a check, so this one can.
+    #[test]
+    fn a_value_less_row_is_not_silently_hardcoded() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("kernel/ has a parent: the repo root");
+        let book =
+            std::fs::read_to_string(root.join("sheets/re/server/fields.tsv")).expect("the book");
+        // The header names its columns (`value:string?`, `status:string`), so the columns
+        // are found by name rather than by a position typed here.
+        let header: Vec<&str> = book
+            .lines()
+            .find(|l| !l.starts_with('#'))
+            .expect("a header line")
+            .split('\t')
+            .collect();
+        let col = |prefix: &str| {
+            header
+                .iter()
+                .position(|c| c.starts_with(prefix))
+                .unwrap_or_else(|| panic!("the header has a {prefix} column"))
+        };
+        let (value, status) = (col("value"), col("status"));
+        let row: Vec<&str> = book
+            .lines()
+            .find(|l| l.starts_with("terraria.netplay.serverpassword"))
+            .expect("the row exists")
+            .split('\t')
+            .collect();
+        assert_eq!(
+            row[value], "-",
+            "the extractor now records a value for ServerPassword: consume the projected \
+             constant in boot.rs instead of citing Netplay.cs:38, and drop this exemption"
+        );
+        assert_eq!(row[status], "todo");
+    }
 }

@@ -199,6 +199,16 @@ pub fn run(argv: &[String]) -> i32 {
         },
         None => port::terraria::Netplay::DefaultPort as u16,
     };
+    // No password flag means no password, which is the C# default: `Netplay.ServerPassword`
+    // is initialised to `""` (Netplay.cs:38), and an empty password asks for nothing.
+    //
+    // This is the ONE serving value the sheets do not carry. The row
+    // `terraria.netplay.serverpassword` exists (`sheets/re/server/fields.tsv`), but the
+    // extractor left its value as `-` and its status as `todo`, so the projection gives
+    // `Netplay::ServerPassword` a field and no constant - there is nothing here to
+    // consume, and inventing a projected value would be worse than citing the C#. The
+    // guard `a_value_less_row_is_not_silently_hardcoded` (lib.rs) fails the day the
+    // extractor fills that cell in, which is the signal to read the constant instead.
     let password = params
         .get("-pass")
         .or_else(|| params.get("-password"))

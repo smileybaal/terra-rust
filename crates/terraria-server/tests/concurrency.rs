@@ -1,12 +1,15 @@
 //! Many concurrent clients, through the real binary.
 //!
-//! `MaxConnections` is 256 (`Netplay.cs:30`). The two things worth proving are that the
+//! `MaxConnections` is projected, not retyped: the limit below is read from the sheet
+//! row `terraria.netplay.maxconnections`, which says 256, which is what `Netplay.cs:30`
+//! says too. The two things worth proving are that the
 //! limit is enforced with the C# "server is full" kick, and that the live-connection
 //! counter comes back to zero once clients leave: a leak there would refuse every
 //! future client forever, which is the failure mode this file exists to catch.
 //!
-//! Every socket has a timeout (see `common`), and the whole file is bounded work: 256
-//! handshakes on loopback, then a fresh one. Nothing waits on a silent server.
+//! Every socket has a timeout (see `common`), and the whole file is bounded work: the
+//! projected limit's worth of handshakes on loopback, then a fresh one. Nothing waits on
+//! a silent server.
 
 mod common;
 
@@ -15,7 +18,10 @@ use std::io::Cursor;
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-const MAX: usize = 256;
+/// The connection limit, read from the projection rather than typed here, so this file
+/// cannot drift away from the book: a hand-typed `256` in a test is the same class of
+/// bug as a hand-typed `7777` in the server.
+const MAX: usize = terraria_kernel::port::terraria::Netplay::MaxConnections as usize;
 
 /// Complete the handshake, which proves the server accepted this socket, counted it,
 /// and ran its thread. Returns the still-open socket so the client stays "live".
