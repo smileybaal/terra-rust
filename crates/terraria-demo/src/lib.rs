@@ -42,8 +42,10 @@ mod tests {
         assert_eq!(p.name, "Player");
         assert_eq!(p.namespace, "Terraria");
         assert_eq!(p.kind, "class");
-        // measured by ILSpy from the decompiled source, not guessed
-        assert_eq!(p.fields, 1316);
+        // measured by ILSpy from the decompiled source, not guessed. It is the
+        // count of this type's OWN members: 1,316 included the members of its 21
+        // nested types, which now live in their own rows (dec011, dec018).
+        assert_eq!(p.fields, 1313);
     }
 
     /// Both platforms are emitted, and both resolve the same shared type.
@@ -64,15 +66,36 @@ mod tests {
     fn the_two_conditional_compilation_divergences_are_visible() {
         let sc = re_client_types::by_id("terraria.netplay").expect("client NetPlay");
         let ss = re_server_types::by_id("terraria.netplay").expect("server NetPlay");
-        assert_eq!(sc.fields, 29);
-        assert_eq!(ss.fields, 31);
+        assert_eq!(sc.fields, 28);
+        assert_eq!(ss.fields, 30);
 
         let cc = re_client_types::by_id("terraria.initializers.chromainitializer")
             .expect("client ChromaInitializer");
         let cs = re_server_types::by_id("terraria.initializers.chromainitializer")
             .expect("server ChromaInitializer");
-        assert_eq!(cc.fields, 17);
+        assert_eq!(cc.fields, 15);
         assert_eq!(cs.fields, 11);
+    }
+
+    /// Nested types are rows, under their parent's dotted path, and own their own
+    /// members rather than lending them to the parent (dec011, dec018).
+    #[test]
+    fn nested_types_are_rows_that_own_their_members() {
+        let outer = re_server_types::by_id("terraria.player").expect("Player");
+        assert_eq!(outer.name, "Player");
+        assert_eq!(outer.namespace, "Terraria");
+
+        let inner = re_server_types::by_id("terraria.player.settings").expect("Player.Settings");
+        assert_eq!(inner.name, "Settings");
+        // the namespace of a nested type is its parent's full path, which is what
+        // makes the id derivable from the row
+        assert_eq!(inner.namespace, "Terraria.Player");
+        assert_eq!(inner.kind, "class");
+        // and it owns its OWN members rather than the parent's: 8, not Player's 1313
+        assert_eq!(inner.fields, 8);
+
+        // a nested type can itself contain a nested type
+        assert!(re_server_types::by_id("terraria.main.currentframeflags.hacks").is_some());
     }
 
     /// Server-only types exist in the server sheet and not the client one.

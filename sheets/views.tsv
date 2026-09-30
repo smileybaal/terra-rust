@@ -20,13 +20,13 @@
 id:string*	sheet:string	columns:string	row_window:string	token_budget:u32	used_by:string	status:string
 v_plan	02-plan	id,kind,target,priority,status	*	1500	architect	done
 v_impl	03-impl	id,sheet,status	*	900	verifier	done
-v_client_types	re/client/types	id,kind,namespace,name,fields,base	1..830	25000	port-agent	done
+v_client_types	re/client/types	id,kind,namespace,name,fields,base	1..760	25000	port-agent	done
 v_client_methods	re/client/methods	id,type,name,kind	1..900	25000	port-agent	done
-v_client_triage	re/client/triage	id,score,priority	*	21000	port-agent	done
+v_client_triage	re/client/triage	id,score,priority	1..1380	21000	port-agent	done
 v_client_functions	re/client/functions	id,name,addr,ref_addr,ref_conf	1..1620	25000	extractor	done
 v_client_strings	re/client/strings	id,addr,text	1..1900	25000	localisation-agent	done
-v_server_types	re/server/types	id,kind,namespace,name,fields,base	1..830	25000	port-agent	done
+v_server_types	re/server/types	id,kind,namespace,name,fields,base	1..760	25000	port-agent	done
 v_server_methods	re/server/methods	id,type,name,kind	1..900	25000	port-agent	done
-v_server_triage	re/server/triage	id,score,priority	*	21000	port-agent	done
+v_server_triage	re/server/triage	id,score,priority	1..1380	21000	port-agent	done
 v_assets	re/assets	id,path,size,status	1..1920	25000	assets-agent	done
 v_full	02-plan	*	*	0	architect	done
