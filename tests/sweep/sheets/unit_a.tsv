@@ -1,0 +1,10 @@
+# sheet: unit_a
+# version: 1
+# generator: sweep
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+id:string*	speed:f32 m/s
+z	1.5

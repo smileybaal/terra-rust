@@ -1,0 +1,10 @@
+# sheet: drift
+# version: 1
+# generator: sweep
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+id:string*	n:u16	extra_col:string
+x	5	here

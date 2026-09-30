@@ -1,0 +1,12 @@
+# sheet: 01-schema
+# version: 1
+# generator: sweep
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+# id_form: compound
+id:string*	sheet:string	column:string	type:string	unit:string	optional:string	ref:string	default:string	view:string	notes:string?
+drift.n	drift	n	f32	-	no	-	-	v_full	-
+drift.ghost	drift	ghost	string	-	yes	-	-	v_full	declared but absent from the header

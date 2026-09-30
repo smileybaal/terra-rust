@@ -1,0 +1,9 @@
+# sheet: kernel
+# version: 1
+# generator: sweep
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+id:string*	kind:string	rust_module:string	status:string	tests:string	notes:string?

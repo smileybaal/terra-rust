@@ -210,14 +210,13 @@ fn cmd_preflight(args: &[String]) -> ExitCode {
 
     // L0 check 22: no generated file may sit in the working tree (D6). The
     // banner written by the emitter is the marker.
-    if let Some(root) = dir.parent() {
-        if do_l0 {
-            pre.extend(check_no_generated_in_tree(root, &root.join("target")));
-        }
-        // L7 check 28: row counts must not move wildly between commits.
-        if do_l0 || do_l1 || do_l2 {
-            check_row_counts(&sheets, root, &mut pre);
-        }
+    let root = book_root(&dir);
+    if do_l0 {
+        pre.extend(check_no_generated_in_tree(&root, &root.join("target")));
+    }
+    // L7 check 28: row counts must not move wildly between commits.
+    if do_l0 || do_l1 || do_l2 {
+        check_row_counts(&sheets, &root, &mut pre);
     }
     // layer filtering
     pre.retain(|f| {

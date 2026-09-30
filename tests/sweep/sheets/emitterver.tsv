@@ -1,0 +1,10 @@
+# sheet: emitterver
+# version: 99
+# generator: sweep
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+id:string*
+z

@@ -859,6 +859,21 @@ pub fn topo_order(sheets: &[Sheet]) -> Result<Vec<String>, Vec<String>> {
     }
 }
 
+/// The repository root implied by a sheets directory.
+///
+/// `Path::new("sheets").parent()` is `Some("")`, an empty path, not the current
+/// directory. Rules that walk out of the sheet book (the kernel allowlist, the
+/// generated-file scan, the git row-count baseline) therefore silently did
+/// nothing under the default `--sheets sheets` - they passed by not running.
+/// That is the exact failure mode this method exists to prevent, so the empty
+/// parent is normalised explicitly.
+pub fn book_root(sheets_dir: &Path) -> PathBuf {
+    match sheets_dir.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
 /// FNV-1a 64. Used for the prefix hash. Any stable hash works here; what matters
 /// is that the identity of the cached prefix is checkable and recorded (MDD
 /// 11.2), so a silent change to it is detectable rather than merely expensive.
@@ -1307,10 +1322,7 @@ fn check_kernel(sheets: &[Sheet], out: &mut Vec<Finding>) {
         Some(k) => k,
         None => return,
     };
-    let root = match kernel.path.parent().and_then(|p| p.parent()) {
-        Some(p) => p.to_path_buf(),
-        None => return,
-    };
+    let root = book_root(&kernel.path.parent().unwrap_or(Path::new(".")));
     let kdir = root.join("kernel");
     let mut on_disk: BTreeSet<String> = BTreeSet::new();
     if kdir.is_dir() {
@@ -1575,6 +1587,25 @@ pub fn human_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]
         }
         if others.len() > 12 {
             let _ = writeln!(out, "      ... +{} more", others.len() - 12);
+        }
+    }
+
+    // A compact inventory of every code present. The per-layer sections above cap
+    // their detail at 12 findings each, so without this a run with 100 errors can
+    // mention 12 and hide 88 - and a hidden finding is exactly the silent failure
+    // this method exists to prevent. This summary is cheap and shows nothing
+    // silently. (A test harness should still read --json.)
+    let mut by_code: BTreeMap<&str, usize> = BTreeMap::new();
+    for f in findings {
+        *by_code.entry(f.code.as_str()).or_insert(0) += 1;
+    }
+    if !by_code.is_empty() {
+        let mut pairs: Vec<(&str, usize)> = by_code.into_iter().collect();
+        pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        let _ = writeln!(out);
+        let _ = writeln!(out, "  findings by code ({} distinct):", pairs.len());
+        for (code, n) in pairs {
+            let _ = writeln!(out, "      {code:<22} {n}");
         }
     }
 

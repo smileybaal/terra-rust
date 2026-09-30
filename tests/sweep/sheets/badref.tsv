@@ -1,0 +1,10 @@
+# sheet: badref
+# version: 1
+# generator: sweep
+# target: scratch
+# index: by_id
+# requires: -
+# owned_by: verifier
+# doctrine: D1
+id:string*	ref:string -> tgt.id	lost:string -> ghost.id
+z	nope	nope

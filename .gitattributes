@@ -1,0 +1,14 @@
+# Byte-exact fixtures.
+#
+# The repository sets core.autocrlf=input so that sheet files cannot acquire CRLF
+# (preflight check 2). That same setting would silently rewrite these two fixtures
+# on checkout, and both exist precisely to test byte-level form, so they must be
+# stored exactly as written. Without -text the CRLF fixture loses its CRLF and
+# E-L0-EOL stops firing on a fresh clone - a test that passes only on the machine
+# that generated it.
+tests/sweep/sheets/crlf.tsv -text
+tests/sweep/sheets/enc.tsv -text
+
+# Generated Rust is never committed (D6), but be explicit about the marker files
+# too so a stray banner file is never normalised into looking legitimate.
+docs/generated/** -text
