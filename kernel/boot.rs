@@ -24,37 +24,88 @@ pub const SAVE_DIR_FLAG: &str = "-savedirectory";
 /// The storage folder `IPathService.GetStoragePath("Terraria")` resolves to.
 pub const SAVE_FOLDER: &str = "Terraria";
 
-/// An approximation of `Platform.Get<IPathService>().GetStoragePath("Terraria")`.
+/// `ReLogic.OS.Windows.PathService.GetStoragePath("Terraria")`.
 ///
-/// The original asks the OS abstraction for the per-user data directory; this uses
-/// the environment variables that back it on each platform. It is an approximation
-/// and is marked as one: the exact answer is a kernel job that has not been done
-/// (see `docs/PIPELINE.md`), and guessing silently would be worse than saying so.
+/// C# is `Path.Combine(Environment.GetFolderPath(SpecialFolder.Personal), "My Games",
+/// "Terraria")`. `SpecialFolder.Personal` is the user's Documents folder, whose default
+/// location is `%USERPROFILE%\Documents`. This is the closest a Rust process can get to
+/// that shell API, so it is still an approximation of a redirected Documents folder, but
+/// it is the same folder the C# server uses - NOT `%APPDATA%`.
+#[allow(dead_code)]
+fn windows_save_path(user_profile: Option<&str>) -> Option<String> {
+    user_profile
+        .filter(|p| !p.is_empty())
+        .map(|p| format!("{p}\\Documents\\My Games\\{SAVE_FOLDER}"))
+}
+
+/// `ReLogic.OS.OSX.PathService.GetStoragePath("Terraria")`.
+///
+/// C# treats an unset OR EMPTY `HOME` as absent and returns `"."`.
+#[allow(dead_code)]
+fn macos_save_path(home: Option<&str>) -> String {
+    match home {
+        Some(h) if !h.is_empty() => format!("{h}/Library/Application Support/{SAVE_FOLDER}"),
+        _ => format!("./{SAVE_FOLDER}"),
+    }
+}
+
+/// `ReLogic.OS.Linux.PathService.GetStoragePath("Terraria")`.
+///
+/// C# treats an unset OR EMPTY `XDG_DATA_HOME` as absent (as the XDG spec requires) and
+/// falls back to `$HOME/.local/share`, then to `"."` when `HOME` is unset or empty too.
+#[allow(dead_code)]
+fn unix_save_path(xdg_data_home: Option<&str>, home: Option<&str>) -> String {
+    let base = match xdg_data_home {
+        Some(x) if !x.is_empty() => x.to_string(),
+        _ => match home {
+            Some(h) if !h.is_empty() => format!("{h}/.local/share"),
+            _ => ".".to_string(),
+        },
+    };
+    format!("{base}/{SAVE_FOLDER}")
+}
+
+/// `Platform.Get<IPathService>().GetStoragePath("Terraria")`, per platform.
+///
+/// The folder name is the argument `Program.LaunchGame` passes, verbatim at
+/// `re/exports/ilspy/Terraria/Program.cs:187`. The Windows shape is corroborated twice
+/// in the evidence tree: the user-facing text in
+/// `re/exports/ilspy/Terraria/UI/FancyErrorPrinter.cs:65,99` names the folder
+/// `Documents/My Games/Terraria`, and `sheets/re/client/strings.tsv` records the
+/// `GetStoragePath` string found in the binary at `0x00e0d11f`.
+///
+/// The macOS and Linux shapes and the `IsNullOrEmpty` handling are INFERRED, not
+/// decompiled: the export carries `Terraria.Libraries.ReLogic.ReLogic.dll` as a binary
+/// with no `.cs` tree, so only the Windows path is evidence-backed. Treat the other two
+/// as a stated approximation, and do not cite them as a decompilation.
 pub fn default_save_path() -> Option<String> {
     #[cfg(windows)]
     {
-        std::env::var("APPDATA").ok().map(|b| format!("{b}\\{SAVE_FOLDER}"))
+        windows_save_path(std::env::var("USERPROFILE").ok().as_deref())
     }
     #[cfg(target_os = "macos")]
     {
-        std::env::var("HOME").ok().map(|h| format!("{h}/Library/Application Support/{SAVE_FOLDER}"))
+        Some(macos_save_path(std::env::var("HOME").ok().as_deref()))
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        std::env::var("XDG_DATA_HOME")
-            .ok()
-            .or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/share")))
-            .map(|b| format!("{b}/{SAVE_FOLDER}"))
+        Some(unix_save_path(
+            std::env::var("XDG_DATA_HOME").ok().as_deref(),
+            std::env::var("HOME").ok().as_deref(),
+        ))
     }
 }
 
 /// Resolve the save directory the way `LaunchGame` does.
+///
+/// C# is `LaunchParameters.ContainsKey("-savedirectory") ? LaunchParameters["-savedirectory"]
+/// : GetStoragePath("Terraria")`, so the flag's value is used verbatim whenever the flag is
+/// present, even when that value is empty or only whitespace.
 pub fn save_path(params: &LaunchParameters) -> Option<String> {
-    match params.get(SAVE_DIR_FLAG) {
-        // the original treats an empty value as "not given" and falls through
-        Some(v) if !v.trim().is_empty() => Some(v.to_string()),
-        _ => default_save_path(),
-    }
+    params
+        .get(SAVE_DIR_FLAG)
+        .map(str::to_string)
+        .or_else(default_save_path)
 }
 
 /// The facts the port can state about the server, read from the projected sheets.
@@ -146,10 +197,52 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_savedirectory_falls_through_to_the_default() {
-        // `LaunchGame` checks the value is not whitespace before using it
-        let p = args::parse(&v(&["-savedirectory", "   "]));
-        assert_eq!(save_path(&p), default_save_path());
+    fn a_savedirectory_flag_is_used_verbatim_even_when_empty() {
+        // C# is `LaunchParameters.ContainsKey("-savedirectory") ? LaunchParameters["-savedirectory"]
+        // : GetStoragePath("Terraria")`: the flag's value is used as-is whenever it is present.
+        // Before the fix this fell through to the platform default for whitespace/empty values.
+        assert_eq!(save_path(&args::parse(&v(&["-savedirectory"]))), Some(String::new()));
+        assert_eq!(
+            save_path(&args::parse(&v(&["-savedirectory", "   "]))),
+            Some("   ".to_string())
+        );
+    }
+
+    #[test]
+    fn the_windows_storage_path_is_my_games_not_appdata() {
+        // ReLogic.OS.Windows.PathService.GetStoragePath() is
+        // Path.Combine(SpecialFolder.Personal, "My Games"), and Personal is Documents.
+        assert_eq!(
+            windows_save_path(Some("C:\\Users\\x")),
+            Some("C:\\Users\\x\\Documents\\My Games\\Terraria".to_string())
+        );
+        // an unset OR empty USERPROFILE must not yield a relative "Documents\\My Games\\Terraria"
+        assert_eq!(windows_save_path(Some("")), None);
+        assert_eq!(windows_save_path(None), None);
+    }
+
+    #[test]
+    fn the_macos_storage_path_treats_an_empty_home_as_unset() {
+        assert_eq!(
+            macos_save_path(Some("/Users/x")),
+            "/Users/x/Library/Application Support/Terraria"
+        );
+        assert_eq!(macos_save_path(Some("")), "./Terraria");
+        assert_eq!(macos_save_path(None), "./Terraria");
+    }
+
+    #[test]
+    fn the_linux_storage_path_treats_an_empty_xdg_home_as_unset() {
+        assert_eq!(unix_save_path(Some("/data"), Some("/home/x")), "/data/Terraria");
+        // empty XDG_DATA_HOME must be treated as unset, as the XDG spec (and the C#
+        // IsNullOrEmpty check) requires
+        assert_eq!(
+            unix_save_path(Some(""), Some("/home/x")),
+            "/home/x/.local/share/Terraria"
+        );
+        assert_eq!(unix_save_path(None, Some("/home/x")), "/home/x/.local/share/Terraria");
+        assert_eq!(unix_save_path(Some(""), Some("")), "./Terraria");
+        assert_eq!(unix_save_path(None, None), "./Terraria");
     }
 
     #[test]

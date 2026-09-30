@@ -5,17 +5,17 @@
 //! preflight fails, this crate does not build at all (MDD D5).
 //!
 //! The client and server are separate modules because they are separate sheet
-//! sets over separate binaries, even though they share 1,544 type ids.
+//! sets over separate binaries, even though they share 2,458 type ids.
 
 pub mod generated {
     //! One module per emitted sheet (MDD 5.9: never one giant module).
 
-    /// Managed types recovered from Terraria.exe (client). 1549 rows.
+    /// Managed types recovered from Terraria.exe (client). 2464 rows.
     pub mod re_client_types {
         include!(concat!(env!("OUT_DIR"), "/sheets/re_client_types.rs"));
     }
 
-    /// Managed types recovered from TerrariaServer.exe (server). 1551 rows.
+    /// Managed types recovered from TerrariaServer.exe (server). 2463 rows.
     pub mod re_server_types {
         include!(concat!(env!("OUT_DIR"), "/sheets/re_server_types.rs"));
     }
@@ -116,6 +116,42 @@ mod tests {
         assert_eq!(plan::COUNT, plan::ALL.len());
         assert_eq!(registry::rows_in("re/client/types"), Some(re_client_types::COUNT));
         assert_eq!(registry::rows_in("re/server/types"), Some(re_server_types::COUNT));
+        assert_eq!(registry::rows_in("02-plan"), Some(plan::COUNT));
+    }
+
+    /// The row counts written in this crate's own module docs are claims about the
+    /// data, so they are read back and checked against the registry rather than
+    /// left as prose that can drift. They did drift: the client/server split
+    /// changed the counts and the doc lines were never updated, so the crate
+    /// advertised 1549/1551 rows while emitting 2464/2463.
+    #[test]
+    fn documented_counts_match_the_sheets() {
+        let src = include_str!("lib.rs");
+
+        let row_count = |marker: &str| -> usize {
+            let line = src
+                .lines()
+                .find(|l| l.contains(marker) && l.contains("rows."))
+                .unwrap_or_else(|| panic!("no module doc stating a row count near '{marker}'"));
+            line.split_whitespace()
+                .find_map(|w| w.trim_end_matches("rows.").parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("no row count in doc line: {line}"))
+        };
+        assert_eq!(registry::rows_in("re/client/types"), Some(row_count("(client).")));
+        assert_eq!(registry::rows_in("re/server/types"), Some(row_count("(server).")));
+
+        // ...and the same for the claim about how many type ids the two platforms
+        // share, recomputed from the emitted data rather than trusted.
+        let shared_line = src
+            .lines()
+            .find(|l| l.contains("type ids."))
+            .expect("the module doc must state how many ids the platforms share");
+        let documented: usize = shared_line
+            .split_whitespace()
+            .find_map(|w| w.trim_end_matches("type ids.").replace(',', "").parse().ok())
+            .expect("a number before 'type ids.'");
+        let shared = re_client_types::ALL.iter().filter(|d| re_server_types::by_id(d.id).is_some()).count();
+        assert_eq!(documented, shared, "stale doc line: {shared_line}");
     }
 
     /// Rows are emitted sorted, which is what makes the lookup a binary search.

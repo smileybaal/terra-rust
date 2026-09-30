@@ -12,12 +12,18 @@ HASH is the one that actually matters legally - a renamed copy is still a copy -
 so it is computed on both sides rather than guessed at from extensions.
 
   python tools/find-game-file-copies.py [--repo .] [--install DIR]
+
+--repo defaults to the repository this script lives in, not the current working
+directory: run from anywhere it still scans the book. With `--repo .` a run from
+tools/ scanned tools/ and printed "MATCHES THAT COULD STILL BE COMMITTED: 0" - a
+green result from a directory that contains no game files at all.
 """
 import argparse
 import hashlib
 import os
 import sys
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_INSTALL = r"C:\Steam\steamapps\common\Terraria"
 SKIP_DIRS = {".git", "target", "node_modules", "__pycache__"}
 
@@ -45,7 +51,7 @@ def walk(root, skip):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", default=".")
+    ap.add_argument("--repo", default=ROOT)
     ap.add_argument("--install", default=DEFAULT_INSTALL)
     ap.add_argument("--no-hash", action="store_true")
     a = ap.parse_args()

@@ -58,6 +58,14 @@ def main():
         print(f"install not found: {install}", file=sys.stderr)
         return 2
 
+    # git() returns stdout only, so a failed git command looks exactly like an
+    # empty repository - and an empty repository reports "no game files" and exits
+    # 0. Refuse before that can happen.
+    if not git("rev-parse", "--git-dir").strip():
+        print(f"not a git repository (or git is unavailable): {ROOT}", file=sys.stderr)
+        print("nothing was checked, so nothing is proven", file=sys.stderr)
+        return 2
+
     # ---- every object the repository actually contains --------------------
     print("reading the object database ...")
     objects = {}
@@ -65,6 +73,9 @@ def main():
         parts = line.split()
         if len(parts) == 3:
             objects[parts[1]] = (parts[0], int(parts[2]))
+    if not objects:
+        print("the object database is unreadable (0 objects): nothing was checked", file=sys.stderr)
+        return 2
     blobs = {k for k, v in objects.items() if v[0] == "blob"}
     print(f"  {len(objects)} objects, {len(blobs)} of them blobs")
 

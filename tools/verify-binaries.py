@@ -66,10 +66,25 @@ for key, name in TARGETS.items():
     side_hash, side_name = m.group(1), m.group(2)
 
     row = roots.get(key)
-    ok = on_disk == side_hash and (row is None or on_disk == row) and side_name == name
+    # A doctrine row that is ABSENT is not agreement. The docstring says three
+    # things must agree; "the row is missing but the sidecar matches" used to
+    # print OK and exit 0, so the bound could be dropped silently.
+    if row is None:
+        ok = False
+        why = f"no {key} row in sheets/00-doctrine.tsv"
+    elif on_disk != row:
+        ok = False
+        why = f"doctrine {key} disagrees with the bytes on disk"
+    elif side_name != name or on_disk != side_hash:
+        ok = False
+        why = f"{name}.sha256 disagrees with the bytes on disk"
+    else:
+        ok = True
+        why = ""
     print(
         f"{'OK      ' if ok else 'MISMATCH'} {name:22} {on_disk[:16]}... "
-        f"side={side_hash[:16]}... doctrine={key} {(row or 'MISSING')[:16]}..."
+        f"side={side_hash[:16]}... doctrine={key} {row[:16] + '...' if row else 'MISSING'}"
+        + (f"  <- {why}" if why else "")
     )
     if not ok:
         bad += 1

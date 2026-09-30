@@ -131,14 +131,21 @@ passes".
 ### Proving the rules fire
 
 ```
-powershell -File tools/test-preflight.ps1
-powershell -File tools/test-truncation.ps1
+python tools/ps.py tools/test-preflight.ps1
+python tools/ps.py tools/test-truncation.ps1
 ```
+
+`ps.py` is the launcher, not decoration: a default Windows box has an execution
+policy of Restricted, and `powershell -File tools/<script>.ps1` dies with a raw
+SecurityError before the first line of the script is read. `ps.py` passes
+`-ExecutionPolicy Bypass` for that one process, without changing machine policy.
 
 The first runs the engine against `tests/preflight-rules/`, a fixture that
 deliberately breaks eight rules, and asserts each diagnostic appears; then it
-asserts the real book is still clean. The second truncates a committed sheet to
-100 rows, asserts both truncation guards fire, and restores the file.
+asserts the real book is still clean. The second truncates a COPY of a committed
+sheet to 100 rows inside a gitignored scratch directory, asserts both truncation
+guards fire, and then proves the committed sheet is byte-identical to HEAD - the
+committed tree is never written to, so a kill cannot leave it truncated.
 
 A rule that has never been seen to fire is not a verified rule (MDD: "a rule that
 never fires may be checking nothing").

@@ -96,9 +96,9 @@ cargo run -p terraria-server -- -savedirectory C:\saves
 cargo test -p terraria-kernel              # 16 tests over the port and the kernel
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 
-powershell -File tools\test-preflight.ps1  # prove the rules actually fire
-powershell -File tools\test-truncation.ps1 # prove the truncation guard fires
-powershell -File tools\test-rules-sweep.ps1# prove all 31 diagnostic codes fire
+python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
+python tools\ps.py tools\test-truncation.ps1 # prove the truncation guard fires
+python tools\ps.py tools\test-rules-sweep.ps1# prove all 31 diagnostic codes fire
 python tools\verify-managed-sheets.py      # cross-sheet invariants over the managed evidence
 ```
 

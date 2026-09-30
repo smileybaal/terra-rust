@@ -2,11 +2,15 @@
 /target
 **/target
 
+# a built binary is an artifact, and tools/guard-no-game-files.py refuses to
+# commit a .exe at all, so one can only ever show up as an untracked file here
+*.exe
+
 # Mode B raw material is regenerable; the evidence sheet is the artifact (MDD §4)
 /re/exports/
 /re/ghidra_projects/
 /re/traces/*.tsv
-/re/ctx/*.tsv
+/re/ctx/
 # A copy of a game file is never committed, whatever it is called. re/binaries is
 # a CHECKSUMMED working copy (see tools/verify-binaries.py): the .sha256 files are
 # the artifact, the binaries beside them are not. Everything else in there is

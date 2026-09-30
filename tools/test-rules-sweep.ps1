@@ -9,18 +9,27 @@
 # E-SCHEMA-DRIFT had never fired at all.
 #
 # Exit 0 = every listed code fired. Exit 1 = at least one did not.
+#
+# The engine is built (or refused) by tools/engine.ps1 before anything is asserted,
+# so a stale target/debug/sheetty.exe cannot make this pass by exercising rules
+# that no longer exist in the tree.
+#
+# A Restricted execution policy kills `powershell -File tools/test-rules-sweep.ps1`
+# before the first line runs; use the launcher instead:
+#
+#     python tools/ps.py tools/test-rules-sweep.ps1
 
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $PSScriptRoot "engine.ps1")
 
 if (-not (Test-Path "tests/sweep/sheets")) {
     Write-Host "generating fixtures..."
     python tools/make-bad-sheets.py
+    if ($LASTEXITCODE -ne 0) { throw "tools/make-bad-sheets.py failed; the sweep fixture is not there" }
 }
 
-$exe = "target/debug/sheetty.exe"
-if (-not (Test-Path $exe)) { $exe = "target/release/sheetty.exe" }
-if (-not (Test-Path $exe)) { throw "build sheetty first: cargo build -p sheetty-cli" }
+$exe = Get-SheettyExe
 
 $json = $null
 try {

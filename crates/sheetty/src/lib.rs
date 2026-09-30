@@ -2164,7 +2164,16 @@ struct Resolver {
     by_name: BTreeMap<String, Vec<String>>,
     /// id -> kind, so a resolved INTERFACE can be boxed where it is used as a type
     kinds: BTreeMap<String, String>,
-    externs: BTreeMap<String, BTreeSet<usize>>,
+    /// The final Rust item name chosen for each (name, arity) extern, so the
+    /// reference and the definition agree even when the naive arity-encoded name
+    /// collides with another extern (`Foo` at arity 1 vs a C# type `Foo_a1`).
+    extern_items: BTreeMap<(String, usize), String>,
+    /// Extern item names already handed out; seeded with the hard-coded `Object`.
+    extern_used: BTreeSet<String>,
+    /// The name of the generated `externs` module. Normally `externs`, but a
+    /// namespace or type at the port root can sanitize to the same name, so it is
+    /// disambiguated against the real module tree before any path is built.
+    externs_mod: String,
     ambiguous: BTreeSet<String>,
     gaps: BTreeSet<String>,
 }
@@ -2222,6 +2231,12 @@ impl Resolver {
             t = rest;
         }
 
+        // `System.Object` is always present as the first extern; its path must use
+        // the same (possibly disambiguated) module name as every other extern.
+        if t == "object" || t == "Object" {
+            return format!("crate::port::{}::Object", self.externs_mod);
+        }
+
         let prim = match t {
             "bool" | "Boolean" => Some("bool"),
             "byte" | "Byte" => Some("u8"),
@@ -2237,7 +2252,6 @@ impl Resolver {
             "decimal" => Some("f64"),
             "char" | "Char" => Some("char"),
             "string" | "String" => Some("String"),
-            "object" | "Object" => Some("crate::port::externs::Object"),
             "IntPtr" => Some("isize"),
             "UIntPtr" => Some("usize"),
             "nint" => Some("isize"),
@@ -2340,25 +2354,55 @@ impl Resolver {
     /// than a suffix applied only when a name is used at several arities. That
     /// matters because the name has to be known at REFERENCE time, while the set
     /// of arities a name is used at is only known after every reference has been
-    /// seen. It is also always unambiguous: `Foo` can only ever mean arity 0.
+    /// seen. The arity-encoded name is a HINT, not a guarantee: a C# type literally
+    /// named `Foo_a1` collides with `Foo` at arity 1, so the first allocation of a
+    /// name is recorded and every later reference reuses it, and a genuine clash is
+    /// disambiguated deterministically rather than emitted as a duplicate item.
     fn placeholder(&mut self, name: &str, arity: usize, args: &[String]) -> String {
-        let e = self.externs.entry(name.to_string()).or_default();
-        e.insert(arity);
+        let key = (name.to_string(), arity);
+        let item = match self.extern_items.get(&key) {
+            Some(it) => it.clone(),
+            None => {
+                let base = if arity == 0 {
+                    name.to_string()
+                } else {
+                    format!("{name}_a{arity}")
+                };
+                let mut cand = base.clone();
+                let mut n = 2;
+                while self.extern_used.contains(&cand) {
+                    cand = format!("{base}_{n}");
+                    n += 1;
+                }
+                self.extern_used.insert(cand.clone());
+                self.extern_items.insert(key, cand.clone());
+                cand
+            }
+        };
         if arity == 0 {
-            format!("crate::port::externs::{name}")
+            format!("crate::port::{}::{item}", self.externs_mod)
         } else {
-            format!("crate::port::externs::{name}_a{arity}<{}>", args.join(", "))
+            format!("crate::port::{}::{item}<{}>", self.externs_mod, args.join(", "))
         }
     }
+}
 
-    /// The item name for an extern at a given arity, as `placeholder` builds it.
-    fn placeholder_item(name: &str, arity: usize) -> String {
-        if arity == 0 {
-            name.to_string()
-        } else {
-            format!("{name}_a{arity}")
+/// The element type of a nullable: `T?` or `Nullable<T>` / `System.Nullable<T>`.
+/// `Option<T>` is a value position, not a pointer, so this is used where a value
+/// cycle has to be distinguished from heap indirection (`Vec<T>`, `*mut T`).
+fn option_inner(ty: &str) -> Option<&str> {
+    let t = ty.trim();
+    if let Some(inner) = t.strip_suffix('?') {
+        return Some(inner.trim());
+    }
+    for p in ["Nullable<", "System.Nullable<"] {
+        if let Some(rest) = t.strip_prefix(p) {
+            if let Some(inner) = rest.strip_suffix('>') {
+                return Some(inner.trim());
+            }
         }
     }
+    None
 }
 
 /// Split `A, B<C, D>` into `["A", "B<C, D>"]`.
@@ -2396,14 +2440,19 @@ fn is_single_number(v: &str) -> bool {
     if body.is_empty() {
         return false;
     }
+    // A hex literal is validated as a whole. The old character scan only allowed a
+    // hex digit immediately after the `x`, so `0x1F` was rejected and every hex
+    // constant carrying a letter was silently dropped from the port.
+    if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+        return !hex.is_empty()
+            && hex.chars().all(|c| c.is_ascii_hexdigit() || c == '_')
+            && hex.chars().any(|c| c.is_ascii_hexdigit());
+    }
     let mut prev = '\0';
     for c in body.chars() {
         let ok = c.is_ascii_digit()
             || c == '_'
             || c == '.'
-            || c == 'x'
-            || c == 'X'
-            || (c.is_ascii_hexdigit() && prev == 'x')
             || ((c == '+' || c == '-') && (prev == 'e' || prev == 'E'))
             || c == 'e'
             || c == 'E';
@@ -2453,18 +2502,26 @@ fn cs_const_literal(rust_ty: &str, cs: &str) -> Option<String> {
             // ONLY a plain integer or a hex integer, and only a single literal. An
             // earlier version accepted any run of hex digits, so `1f` - a float with a
             // suffix - passed as `1f` and rustc rejected it as an invalid suffix.
-            let x = if v.ends_with(['u', 'U', 'l', 'L']) { &v[..v.len() - 1] } else { v };
-            if !is_single_number(x) || x.contains(['.', 'f', 'F']) {
-                return None;
+            // A C# integer suffix is a trailing run of `u`/`U`/`l`/`L`.
+            let mut x = v;
+            while x.len() > 1 && x.ends_with(['u', 'U', 'l', 'L']) {
+                x = &x[..x.len() - 1];
             }
             let body = x.strip_prefix(['-', '+']).unwrap_or(x);
+            // a hex literal is not a float with an `f` suffix: `0xFF` must survive
             let hex = body
                 .strip_prefix("0x")
                 .or_else(|| body.strip_prefix("0X"))
                 .map(|h| !h.is_empty() && h.chars().all(|c| c.is_ascii_hexdigit() || c == '_'))
                 .unwrap_or(false);
+            if hex {
+                return Some(x.to_string());
+            }
+            if !is_single_number(x) || x.contains(['.', 'f', 'F']) {
+                return None;
+            }
             let dec = !body.is_empty() && body.chars().all(|c| c.is_ascii_digit() || c == '_');
-            if hex || dec {
+            if dec {
                 Some(x.to_string())
             } else {
                 None
@@ -2589,7 +2646,9 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
         by_id: BTreeMap::new(),
         by_name: BTreeMap::new(),
         kinds: BTreeMap::new(),
-        externs: BTreeMap::new(),
+        extern_items: BTreeMap::new(),
+        extern_used: ["Object".to_string()].into_iter().collect(),
+        externs_mod: "externs".to_string(),
         ambiguous: BTreeSet::new(),
         gaps: BTreeSet::new(),
     };
@@ -2631,6 +2690,21 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
                 .or_default()
                 .insert(r.mod_path[i].clone());
         }
+    }
+    // The generated `externs` module shares the ROOT scope with every top-level
+    // item and module, so a namespace (`Externs`) or a root type whose item is
+    // `externs` would define the name twice. Pick a free name before any path is
+    // built from it; the resolver uses the same name for every extern reference.
+    {
+        let root_mods = child_names.get(&Vec::new());
+        let root_items = item_names.get(&Vec::new());
+        let mut name = "externs".to_string();
+        while root_mods.map(|m| m.contains(&name)).unwrap_or(false)
+            || root_items.map(|i| i.contains(&name)).unwrap_or(false)
+        {
+            name.push('_');
+        }
+        res.externs_mod = name;
     }
     let mut renamed: BTreeMap<(Vec<String>, String), String> = BTreeMap::new();
     for (parent, kids) in &child_names {
@@ -2693,10 +2767,16 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
                     continue;
                 }
                 let ty = f.ty.trim();
-                if ty.contains(['<', '[', '*', '?']) {
+                // `Option<T>` is a value position, not a pointer, so a cycle
+                // through a nullable field is a real size cycle and must be seen.
+                let base = if let Some(inner) = option_inner(ty) {
+                    inner
+                } else if ty.contains(['<', '[', '*']) {
                     continue;
-                }
-                let bare = ty.rsplit('.').next().unwrap_or(ty).to_lowercase();
+                } else {
+                    ty
+                };
+                let bare = base.rsplit('.').next().unwrap_or(base).to_lowercase();
                 let ctx_ns = r.id.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or_default();
                 let own = format!("{ctx_ns}.{bare}");
                 let cand = if index.contains_key(own.trim_start_matches('.')) {
@@ -2812,8 +2892,11 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
                         continue;
                     }
                     let mut v = port_ident(&f.name);
-                    if v == r.item || seen.contains(&v) {
-                        v = format!("{v}_");
+                    // A single `_` suffix is not enough: the variant `A` of enum `A`
+                    // becomes `A_`, which then collides with a member already named
+                    // `A_`. Keep extending until the name is free.
+                    while v == r.item || seen.contains(&v) {
+                        v.push('_');
                     }
                     seen.insert(v.clone());
                     let mut disc = match f.value.trim().parse::<i64>() {
@@ -2866,12 +2949,15 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
                 }
                 let mut seen: BTreeSet<String> = BTreeSet::new();
                 for m in &r.methods {
-                    let mut sig = port_method_sig(&mut res, m, &r.id, &mut seen);
+                    let sig = port_method_sig(&mut res, m, &r.id, &mut seen);
                     if sig.is_empty() {
                         continue;
                     }
-                    sig.push_str(" { unimplemented!() }");
-                    let _ = writeln!(item, "    {sig}");
+                    // A trait item has no visibility of its own; `pub fn` inside a
+                    // trait is E0449. `port_method_sig` emits `pub fn` for inherent
+                    // methods, so strip it here rather than special-casing the sig.
+                    let sig = sig.strip_prefix("pub ").unwrap_or(&sig);
+                    let _ = writeln!(item, "    {sig} {{ unimplemented!() }}");
                 }
                 let _ = writeln!(item, "}}\n");
             }
@@ -2905,7 +2991,14 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
                     let ty = if ty == own_path
                         || boxed_fields.contains(&(r.id.clone(), f.name.clone()))
                     {
-                        format!("Box<{ty}>")
+                        // `Option<T>` is a value wrapper: `Box<Option<T>>` still
+                        // stores `T` inline, so the Box has to go inside, next to
+                        // the recursive type.
+                        if let Some(inner) = ty.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')) {
+                            format!("Option<Box<{inner}>>")
+                        } else {
+                            format!("Box<{ty}>")
+                        }
                     } else {
                         ty
                     };
@@ -2918,6 +3011,10 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
         // the impl: constants, then methods
         if matches!(r.kind.as_str(), "class" | "struct") {
             let mut body = String::new();
+            // Consts and methods share one associated-item namespace, so they are
+            // deduped together: two rows whose names sanitize to the same Rust item
+            // would otherwise emit the (invalid) duplicate.
+            let mut seen: BTreeSet<String> = BTreeSet::new();
             for f in &r.fields {
                 if f.kind != "const" {
                     continue;
@@ -2929,9 +3026,17 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
                     res.gaps.insert(format!("const value: {}", f.name));
                     continue;
                 };
-                let _ = writeln!(body, "    pub const {}: {} = {};", port_ident(&f.name), ty, lit);
+                let mut name = port_ident(&f.name);
+                if seen.contains(&name) {
+                    let mut k = 2;
+                    while seen.contains(&format!("{name}_{k}")) {
+                        k += 1;
+                    }
+                    name = format!("{name}_{k}");
+                }
+                seen.insert(name.clone());
+                let _ = writeln!(body, "    pub const {name}: {ty} = {lit};");
             }
-            let mut seen: BTreeSet<String> = BTreeSet::new();
             for m in &r.methods {
                 let sig = port_method_sig(&mut res, m, &r.id, &mut seen);
                 if sig.is_empty() {
@@ -2989,25 +3094,23 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
 
     // --- externs -----------------------------------------------------------
     let mut ext_items: Vec<String> = Vec::new();
-    for (name, arities) in &res.externs {
-        for &a in arities {
-            let item = Resolver::placeholder_item(name, a);
-            if a == 0 {
-                ext_items.push(format!("/// Referenced by the server but not declared in it.\npub struct {item};"));
-            } else if a == 1 {
-                ext_items.push(format!(
-                    "/// Referenced by the server but not declared in it.\npub struct {item}<T0>(pub core::marker::PhantomData<T0>);"
-                ));
-            } else {
-                let gens: Vec<String> = (0..a).map(|i| format!("T{i}")).collect();
-                // a TUPLE inside PhantomData, because PhantomData takes exactly one
-                // type parameter and `PhantomData<T0, T1>` does not compile
-                ext_items.push(format!(
-                    "/// Referenced by the server but not declared in it.\npub struct {item}<{}>(pub core::marker::PhantomData<({})>);",
-                    gens.join(", "),
-                    gens.join(", ")
-                ));
-            }
+    for ((_name, a), item) in &res.extern_items {
+        let a = *a;
+        if a == 0 {
+            ext_items.push(format!("/// Referenced by the server but not declared in it.\npub struct {item};"));
+        } else if a == 1 {
+            ext_items.push(format!(
+                "/// Referenced by the server but not declared in it.\npub struct {item}<T0>(pub core::marker::PhantomData<T0>);"
+            ));
+        } else {
+            let gens: Vec<String> = (0..a).map(|i| format!("T{i}")).collect();
+            // a TUPLE inside PhantomData, because PhantomData takes exactly one
+            // type parameter and `PhantomData<T0, T1>` does not compile
+            ext_items.push(format!(
+                "/// Referenced by the server but not declared in it.\npub struct {item}<{}>(pub core::marker::PhantomData<({})>);",
+                gens.join(", "),
+                gens.join(", ")
+            ));
         }
     }
 
@@ -3015,7 +3118,7 @@ pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String
     let _ = writeln!(out, "/// Types the server references but does not declare: the BCL, XNA, and the");
     let _ = writeln!(out, "/// delegates whose signatures are not in the book. Generated so the port");
     let _ = writeln!(out, "/// compiles; replace them with real definitions as they are ported.");
-    let _ = writeln!(out, "pub mod externs {{");
+    let _ = writeln!(out, "pub mod {} {{", res.externs_mod);
     let _ = writeln!(out, "    #![allow(non_camel_case_types)]");
     let _ = writeln!(out, "    /// A stand-in for `System.Object`.");
     let _ = writeln!(out, "    pub struct Object;");

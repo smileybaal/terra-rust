@@ -101,7 +101,7 @@ fn main() -> ExitCode {
                         }
                     }
                     if let Some(p) = flag_value(&rest, "--out").map(PathBuf::from) {
-                        if let Err(e) = std::fs::write(&p, text) {
+                        if let Err(e) = write_out(&p, text.as_bytes()) {
                             eprintln!("cannot write {}: {e}", p.display());
                             return ExitCode::from(1);
                         }
@@ -192,6 +192,22 @@ fn sheets_dir(args: &[String]) -> PathBuf {
     PathBuf::from(flag_value(args, "--sheets").unwrap_or_else(|| "sheets".to_string()))
 }
 
+/// Write `bytes` to `path`, creating any missing parent directories first.
+///
+/// The documented `pack v_client_methods --rows 1..900 --out re/ctx/pack.txt`
+/// must work from a clean checkout, where `re/ctx` does not exist. Plain
+/// `std::fs::write` fails there with "cannot find the path specified"; the
+/// emitter already creates its output tree (see `write_if_changed`), so `--out`
+/// has to behave the same way.
+fn write_out(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(path, bytes)
+}
+
 fn cmd_preflight(args: &[String]) -> ExitCode {
     let dir = sheets_dir(args);
     let layer = flag_value(args, "--layer").unwrap_or_default();
@@ -218,9 +234,12 @@ fn cmd_preflight(args: &[String]) -> ExitCode {
     if do_l0 || do_l1 || do_l2 {
         check_row_counts(&sheets, &root, &mut pre);
     }
-    // layer filtering
+    // layer filtering. A finding code is `E-L<n>-...` / `W-L<n>-...`, so the
+    // layer digit is the fourth character (index 3). Reading index 2 yields the
+    // 'L' of 'L<n>' for every code, which made `--layer` a silent no-op: an
+    // L1-only finding survived `preflight --layer L0`.
     pre.retain(|f| {
-        let l = f.code.chars().nth(2);
+        let l = f.code.chars().nth(3);
         match l {
             Some('0') => do_l0,
             Some('1') => do_l1,
@@ -400,7 +419,7 @@ fn cmd_view(args: &[String]) -> ExitCode {
     }
     match flag_value(args, "--out").map(PathBuf::from) {
         Some(p) => {
-            if let Err(e) = std::fs::write(&p, out) {
+            if let Err(e) = write_out(&p, out.as_bytes()) {
                 eprintln!("cannot write {}: {e}", p.display());
                 return ExitCode::from(1);
             }
@@ -417,7 +436,7 @@ fn cmd_schema(args: &[String]) -> ExitCode {
     let (sheets, _) = load_book(&dir);
     if let Some(p) = flag_value(args, "--emit").map(PathBuf::from) {
         let tsv = schema_tsv(&sheets);
-        if let Err(e) = std::fs::write(&p, tsv) {
+        if let Err(e) = write_out(&p, tsv.as_bytes()) {
             eprintln!("cannot write {}: {e}", p.display());
             return ExitCode::from(1);
         }

@@ -6,15 +6,25 @@
 # asserts each expected diagnostic code appears.
 #
 # Exit 0 = every expected rule fired. Exit 1 = at least one did not.
+#
+# The engine is built (or refused) by tools/engine.ps1 before anything is asserted,
+# so this cannot pass by exercising a stale target/debug/sheetty.exe.
+#
+# Running it: a default Windows box has an execution policy of Restricted, and
+# `powershell -File tools/test-preflight.ps1` then dies with a raw policy error
+# before a single line of this file is read. Nothing inside the script can change
+# that - the policy is consulted before the file loads - so run it through the
+# launcher, which does not depend on the machine's policy:
+#
+#     python tools/ps.py tools/test-preflight.ps1
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+. (Join-Path $PSScriptRoot "engine.ps1")
 
 $fixture = "tests/preflight-rules"
-$exe = "target/debug/sheetty.exe"
-if (-not (Test-Path $exe)) { $exe = "target/release/sheetty.exe" }
-if (-not (Test-Path $exe)) { throw "build sheetty first: cargo build -p sheetty-cli" }
+$exe = Get-SheettyExe
 
 Write-Host "== preflight against $fixture =="
 $out = & $exe preflight --sheets $fixture 2>&1 | Out-String
