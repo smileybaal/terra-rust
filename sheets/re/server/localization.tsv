@@ -1,0 +1,135 @@
+# sheet: re/server/localization
+# version: 1
+# generator: localization
+# target: sheets/re/server
+# index: by_id
+# requires: re/sources
+# owned_by: extractor
+# doctrine: D1
+# evidence: required
+# emit: rust
+# Localization keys for the server binary, from the game's own table.
+# The sheets carry no strings (dec015), so this relation is what lets the
+# port READ its protocol and console text instead of repeating it. `key` is
+# the case-sensitive key exactly as the C# passes it to
+# Language.GetTextValue, and `text` is the en-US value.
+# `section` is the first dotted segment of the key, so a later run can carry
+# another section without restructuring the sheet.
+# `length` is the UTF-8 byte length of `text`.
+# `ref_addr` is the JSON pointer of the leaf inside the artifact.
+# Only the CLI section is carried so far; the rest are counted in
+# `dropped` below, so the sheet cannot look complete while it is not.
+# Keys are dotted paths, so the compound-key exception is declared (dec009).
+# id_form: compound
+# source_rows: 3699
+# dropped: 3591
+# dropped_reason: 0 leaf/leaves contain a TAB or newline and cannot be represented (dec008); 3591 belong to sections this run does not carry
+id:string*	key:string	section:string	text:string	length:u16	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
+cli.automaticportforward	CLI.AutomaticPortForward	CLI	Automatically forward port? (y/n): 	35	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/AutomaticPortForward	certain	localization table leaf
+cli.availablecommands	CLI.AvailableCommands	CLI	Available commands:	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/AvailableCommands	certain	localization table leaf
+cli.ban_command	CLI.Ban_Command	CLI	ban	3	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Ban_Command	certain	localization table leaf
+cli.ban_description	CLI.Ban_Description	CLI	Bans a player from the server.	30	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Ban_Description	certain	localization table leaf
+cli.ban_example	CLI.Ban_Example	CLI	ban <player>	12	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Ban_Example	certain	localization table leaf
+cli.ban_usage	CLI.Ban_Usage	CLI	Usage: ban <player>	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Ban_Usage	certain	localization table leaf
+cli.banmessage	CLI.BanMessage	CLI	Banned from server.	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/BanMessage	certain	localization table leaf
+cli.choosedifficulty	CLI.ChooseDifficulty	CLI	Choose difficulty: 	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ChooseDifficulty	certain	localization table leaf
+cli.chooseevil	CLI.ChooseEvil	CLI	Choose world evil: 	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ChooseEvil	certain	localization table leaf
+cli.choosesize	CLI.ChooseSize	CLI	Choose size: 	13	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ChooseSize	certain	localization table leaf
+cli.chooseworld	CLI.ChooseWorld	CLI	Choose World: 	14	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ChooseWorld	certain	localization table leaf
+cli.clear_command	CLI.Clear_Command	CLI	clear	5	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Clear_Command	certain	localization table leaf
+cli.clear_description	CLI.Clear_Description	CLI	Clear the console window.	25	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Clear_Description	certain	localization table leaf
+cli.clientwasbooted	CLI.ClientWasBooted	CLI	{0} was booted: {1}	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ClientWasBooted	certain	localization table leaf
+cli.corrupt	CLI.Corrupt	CLI	Corrupt	7	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Corrupt	certain	localization table leaf
+cli.crimson	CLI.Crimson	CLI	Crimson	7	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Crimson	certain	localization table leaf
+cli.dawn_command	CLI.Dawn_Command	CLI	dawn	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Dawn_Command	certain	localization table leaf
+cli.dawn_description	CLI.Dawn_Description	CLI	Change time to dawn.	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Dawn_Description	certain	localization table leaf
+cli.deleteconfirmation	CLI.DeleteConfirmation	CLI	Really delete {0}?	18	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/DeleteConfirmation	certain	localization table leaf
+cli.deleteworld_command	CLI.DeleteWorld_Command	CLI	d	1	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/DeleteWorld_Command	certain	localization table leaf
+cli.deleteworld_description	CLI.DeleteWorld_Description	CLI	Delete World	12	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/DeleteWorld_Description	certain	localization table leaf
+cli.deleteworld_example	CLI.DeleteWorld_Example	CLI	d <number>	10	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/DeleteWorld_Example	certain	localization table leaf
+cli.displayseed	CLI.DisplaySeed	CLI	World Seed: {0}	15	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/DisplaySeed	certain	localization table leaf
+cli.dusk_command	CLI.Dusk_Command	CLI	dusk	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Dusk_Command	certain	localization table leaf
+cli.dusk_description	CLI.Dusk_Description	CLI	Change time to dusk.	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Dusk_Description	certain	localization table leaf
+cli.enterseed	CLI.EnterSeed	CLI	Enter Seed (Leave Blank For Random):	36	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/EnterSeed	certain	localization table leaf
+cli.enterseedtogglenumber	CLI.EnterSeedToggleNumber	CLI	Enter Seed Number to enable/disable it (Leave Blank To Continue): 	66	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/EnterSeedToggleNumber	certain	localization table leaf
+cli.enterserverpassword	CLI.EnterServerPassword	CLI	Server password (press enter for none): 	40	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/EnterServerPassword	certain	localization table leaf
+cli.enterworldname	CLI.EnterWorldName	CLI	Enter world name: 	18	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/EnterWorldName	certain	localization table leaf
+cli.exit_command	CLI.Exit_Command	CLI	exit	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Exit_Command	certain	localization table leaf
+cli.exit_description	CLI.Exit_Description	CLI	Shutdown the server and save.	29	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Exit_Description	certain	localization table leaf
+cli.exitnosave_command	CLI.ExitNoSave_Command	CLI	exit-nosave	11	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ExitNoSave_Command	certain	localization table leaf
+cli.exitnosave_description	CLI.ExitNoSave_Description	CLI	Shutdown the server without saving.	35	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ExitNoSave_Description	certain	localization table leaf
+cli.fps_command	CLI.FPS_Command	CLI	fps	3	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/FPS_Command	certain	localization table leaf
+cli.help_command	CLI.Help_Command	CLI	help	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Help_Command	certain	localization table leaf
+cli.help_description	CLI.Help_Description	CLI	Displays a list of commands.	28	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Help_Description	certain	localization table leaf
+cli.helphint	CLI.HelpHint	CLI	Type 'help' for a list of commands.	35	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/HelpHint	certain	localization table leaf
+cli.invalidcommand	CLI.InvalidCommand	CLI	Invalid command.	16	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/InvalidCommand	certain	localization table leaf
+cli.kick_command	CLI.Kick_Command	CLI	kick	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Kick_Command	certain	localization table leaf
+cli.kick_description	CLI.Kick_Description	CLI	Kicks a player from the server.	31	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Kick_Description	certain	localization table leaf
+cli.kick_example	CLI.Kick_Example	CLI	kick <player>	13	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Kick_Example	certain	localization table leaf
+cli.kick_usage	CLI.Kick_Usage	CLI	Usage: kick <player>	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Kick_Usage	certain	localization table leaf
+cli.kickmessage	CLI.KickMessage	CLI	Kicked from server.	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/KickMessage	certain	localization table leaf
+cli.listeningonport	CLI.ListeningOnPort	CLI	Listening on port {0}	21	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ListeningOnPort	certain	localization table leaf
+cli.maxplayers_command	CLI.MaxPlayers_Command	CLI	maxplayers	10	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/MaxPlayers_Command	certain	localization table leaf
+cli.maxplayers_description	CLI.MaxPlayers_Description	CLI	Print the max number of players.	32	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/MaxPlayers_Description	certain	localization table leaf
+cli.midnight_command	CLI.Midnight_Command	CLI	midnight	8	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Midnight_Command	certain	localization table leaf
+cli.midnight_description	CLI.Midnight_Description	CLI	Change time to midnight.	24	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Midnight_Description	certain	localization table leaf
+cli.motd	CLI.MOTD	CLI	MOTD: {0}	9	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/MOTD	certain	localization table leaf
+cli.motd_command	CLI.MOTD_Command	CLI	motd	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/MOTD_Command	certain	localization table leaf
+cli.motd_description	CLI.MOTD_Description	CLI	Print MOTD.	11	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/MOTD_Description	certain	localization table leaf
+cli.newworld_command	CLI.NewWorld_Command	CLI	n	1	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/NewWorld_Command	certain	localization table leaf
+cli.newworld_description	CLI.NewWorld_Description	CLI	New World	9	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/NewWorld_Description	certain	localization table leaf
+cli.no	CLI.No	CLI	no	2	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/No	certain	localization table leaf
+cli.nomotd	CLI.NoMOTD	CLI	Welcome to {0}!	15	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/NoMOTD	certain	localization table leaf
+cli.noon_command	CLI.Noon_Command	CLI	noon	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Noon_Command	certain	localization table leaf
+cli.noon_description	CLI.Noon_Description	CLI	Change time to noon.	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Noon_Description	certain	localization table leaf
+cli.nopassword	CLI.NoPassword	CLI	No password set.	16	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/NoPassword	certain	localization table leaf
+cli.noplayers	CLI.NoPlayers	CLI	No players connected.	21	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/NoPlayers	certain	localization table leaf
+cli.novalidseed	CLI.NoValidSeed	CLI	This world was generated in an older version that did not support seeds.	72	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/NoValidSeed	certain	localization table leaf
+cli.oneplayerconnected	CLI.OnePlayerConnected	CLI	1 player connected.	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/OnePlayerConnected	certain	localization table leaf
+cli.password	CLI.Password	CLI	Password: {0}	13	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Password	certain	localization table leaf
+cli.password_command	CLI.Password_Command	CLI	password	8	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Password_Command	certain	localization table leaf
+cli.password_description	CLI.Password_Description	CLI	Show password.	14	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Password_Description	certain	localization table leaf
+cli.passworddisabled	CLI.PasswordDisabled	CLI	Password disabled.	18	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/PasswordDisabled	certain	localization table leaf
+cli.passwordset	CLI.PasswordSet	CLI	Password: {0}	13	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/PasswordSet	certain	localization table leaf
+cli.playerlimit	CLI.PlayerLimit	CLI	Player limit: {0}	17	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/PlayerLimit	certain	localization table leaf
+cli.playersconnected	CLI.PlayersConnected	CLI	{0} players connected.	22	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/PlayersConnected	certain	localization table leaf
+cli.playing_command	CLI.Playing_Command	CLI	playing	7	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Playing_Command	certain	localization table leaf
+cli.playing_description	CLI.Playing_Description	CLI	Shows the list of players.	26	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Playing_Description	certain	localization table leaf
+cli.port	CLI.Port	CLI	Port: {0}	9	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Port	certain	localization table leaf
+cli.port_command	CLI.Port_Command	CLI	port	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Port_Command	certain	localization table leaf
+cli.port_description	CLI.Port_Description	CLI	Print the listening port.	25	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Port_Description	certain	localization table leaf
+cli.random	CLI.Random	CLI	Random	6	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Random	certain	localization table leaf
+cli.save_command	CLI.Save_Command	CLI	save	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Save_Command	certain	localization table leaf
+cli.save_description	CLI.Save_Description	CLI	Save the game world.	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Save_Description	certain	localization table leaf
+cli.say_command	CLI.Say_Command	CLI	say	3	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Say_Command	certain	localization table leaf
+cli.say_description	CLI.Say_Description	CLI	Send a message.	15	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Say_Description	certain	localization table leaf
+cli.say_example	CLI.Say_Example	CLI	say <words>	11	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Say_Example	certain	localization table leaf
+cli.say_usage	CLI.Say_Usage	CLI	Usage: say <words>	18	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Say_Usage	certain	localization table leaf
+cli.secretseedenabled	CLI.SecretSeedEnabled	CLI	Secret activated!	17	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SecretSeedEnabled	certain	localization table leaf
+cli.seed_command	CLI.Seed_Command	CLI	seed	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Seed_Command	certain	localization table leaf
+cli.seed_description	CLI.Seed_Description	CLI	Displays the world seed.	24	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Seed_Description	certain	localization table leaf
+cli.seedlengthtoolong	CLI.SeedLengthTooLong	CLI	The seed entered is too long! (Max characters: {0})	51	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SeedLengthTooLong	certain	localization table leaf
+cli.server	CLI.Server	CLI	Terraria Server {0}	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Server	certain	localization table leaf
+cli.serverisfull	CLI.ServerIsFull	CLI	This server is full right now, please try again later.	54	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ServerIsFull	certain	localization table leaf
+cli.servermessage	CLI.ServerMessage	CLI	<Server> {0}	12	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ServerMessage	certain	localization table leaf
+cli.serverstarted	CLI.ServerStarted	CLI	Server started	14	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ServerStarted	certain	localization table leaf
+cli.setinitialmaxplayers	CLI.SetInitialMaxPlayers	CLI	Max players (press enter for 16): 	34	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetInitialMaxPlayers	certain	localization table leaf
+cli.setinitialport	CLI.SetInitialPort	CLI	Server port (press enter for 7777): 	36	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetInitialPort	certain	localization table leaf
+cli.setmotd_command	CLI.SetMOTD_Command	CLI	motd	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetMOTD_Command	certain	localization table leaf
+cli.setmotd_description	CLI.SetMOTD_Description	CLI	Change MOTD.	12	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetMOTD_Description	certain	localization table leaf
+cli.setmotd_example	CLI.SetMOTD_Example	CLI	motd <words>	12	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetMOTD_Example	certain	localization table leaf
+cli.setpassword_command	CLI.SetPassword_Command	CLI	password	8	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetPassword_Command	certain	localization table leaf
+cli.setpassword_description	CLI.SetPassword_Description	CLI	Change password.	16	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetPassword_Description	certain	localization table leaf
+cli.setpassword_example	CLI.SetPassword_Example	CLI	password <pass>	15	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/SetPassword_Example	certain	localization table leaf
+cli.settle_command	CLI.Settle_Command	CLI	settle	6	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Settle_Command	certain	localization table leaf
+cli.settle_description	CLI.Settle_Description	CLI	Settle all water.	17	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Settle_Description	certain	localization table leaf
+cli.shortno	CLI.ShortNo	CLI	n	1	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ShortNo	certain	localization table leaf
+cli.shortyes	CLI.ShortYes	CLI	y	1	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/ShortYes	certain	localization table leaf
+cli.time	CLI.Time	CLI	Time: {0}	9	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Time	certain	localization table leaf
+cli.time_command	CLI.Time_Command	CLI	time	4	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Time_Command	certain	localization table leaf
+cli.time_description	CLI.Time_Description	CLI	Display game time.	18	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Time_Description	certain	localization table leaf
+cli.version_command	CLI.Version_Command	CLI	version	7	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Version_Command	certain	localization table leaf
+cli.version_description	CLI.Version_Description	CLI	Print version number.	21	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Version_Description	certain	localization table leaf
+cli.waterisalreadysettling	CLI.WaterIsAlreadySettling	CLI	Water is already settling	25	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/WaterIsAlreadySettling	certain	localization table leaf
+cli.worldnamelengthtoolong	CLI.WorldNameLengthTooLong	CLI	The world name entered is too long! (Max characters: {0})	57	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/WorldNameLengthTooLong	certain	localization table leaf
+cli.yes	CLI.Yes	CLI	yes	3	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Yes	certain	localization table leaf

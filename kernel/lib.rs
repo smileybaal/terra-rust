@@ -32,6 +32,15 @@ pub mod sheets {
     pub mod re_server_types {
         include!(concat!(env!("OUT_DIR"), "/sheets/re_server_types.rs"));
     }
+    /// The server's own localization table (`sheets/re/server/localization.tsv`).
+    ///
+    /// The sheets carry no strings at all (dec015), so before this relation every
+    /// protocol string in `net` was hand-cited from the C# and the game's
+    /// localization file. Now they are rows, and `by_id` reads them: the lookup is
+    /// a binary search over a static table sorted by id.
+    pub mod localization {
+        include!(concat!(env!("OUT_DIR"), "/sheets/re_server_localization.rs"));
+    }
     pub mod registry {
         include!(concat!(env!("OUT_DIR"), "/registry.rs"));
     }
@@ -80,6 +89,29 @@ mod tests {
         assert_eq!(AchievementCategory::None as i64, -1);
         assert_eq!(AchievementCategory::Slayer as i64, 0);
         assert_eq!(AchievementCategory::Collector as i64, 1);
+    }
+
+    /// The localization relation carries the CLI section, and every row is a
+    /// lookupable key. This is the chain the port now depends on: the game's JSON
+    /// -> sheet row -> generated `Def` -> the string the server prints.
+    #[test]
+    fn the_localization_relation_carries_the_cli_section() {
+        use sheets::localization::{by_id, COUNT};
+        assert_eq!(COUNT, 108);
+        let prompt = by_id("cli.chooseworld").expect("the world-select prompt is a row");
+        assert_eq!(prompt.key, "CLI.ChooseWorld");
+        assert_eq!(prompt.text, "Choose World: ");
+        assert_eq!(prompt.section, "CLI");
+        // The row the connection-limit kick needs, so a typo in the id cannot
+        // silently produce a kick with no text.
+        assert_eq!(by_id("cli.serverisfull").unwrap().key, "CLI.ServerIsFull");
+        assert_eq!(by_id("cli.serverisfull").unwrap().text,
+                   "This server is full right now, please try again later.");
+        // `length` is the UTF-8 byte length, so a multi-byte string would disagree
+        // with `.len()` and this is where that would surface.
+        for d in sheets::localization::ALL {
+            assert_eq!(d.length as usize, d.text.len(), "length disagrees for {}", d.id);
+        }
     }
 
     /// A struct exists as a real Rust type, sized from the fields the sheet declares.

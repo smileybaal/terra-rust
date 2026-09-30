@@ -96,7 +96,7 @@ cargo run -p sheetty-cli -- pack v_server_types --rows 1..900   # ad-hoc row win
 
 cargo build -p terraria-server             # the Rust server: generated shape + hand-written kernel
 cargo run -p terraria-server -- -savedirectory C:\saves
-cargo test -p terraria-kernel              # 46 tests over the port, the kernel and the net entry path
+cargo test -p terraria-kernel              # 47 tests over the port, the kernel and the net entry path
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 
 python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
@@ -111,7 +111,7 @@ python tools\mitm.py --listen 127.0.0.1:1739 --target 127.0.0.1:7777   # log eve
 mistaken for "the whole MDD checklist passed". An absent rule is not a passing one:
 
 ```
-PREFLIGHT  sheets/  24 sheets, 229260 rows, 224 columns
+PREFLIGHT  sheets/  25 sheets, 229380 rows, 234 columns
   emitter 0.1.0
   rule coverage  29/30 MDD checks exist (implemented 22, partial 6, unexercised 1, absent 1)
   (run `sheetty rules` for the per-check status; an absent rule is not a passing one)
@@ -135,9 +135,9 @@ whole 125 MB assembly regardless of `-t`).
 | Item | Value |
 |---|---|
 | targets | `Terraria.exe` (client) `960a03bf...`; `TerrariaServer.exe` (server) `328872c6...`; both PE32 i386 .NET CLI assemblies |
-| sheets | 24 |
-| rows | 229,262 |
-| columns | 224 |
+| sheets | 25 |
+| rows | 229,380 |
+| columns | 234 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
 | preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
 | diagnostic coverage | 31 codes proven to fire by `tools/test-rules-sweep.ps1` against generated fixtures |
@@ -145,7 +145,7 @@ whole 125 MB assembly regardless of `-t`).
 | server evidence (ILSpy) | 2,463 types, 30,040 members, 14,486 methods, 3,601 edges |
 | client vs server | 2,458 shared, 6 client-only, 5 server-only, 2 divergent |
 | Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders; 126,315 lines across 5 emitted modules |
-| Rust kernel (hand-written) | `kernel/{lib,args,boot,net}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 46 tests |
+| Rust kernel (hand-written) | `kernel/{lib,args,boot,net}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 47 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 
@@ -439,7 +439,7 @@ deliberately dropped, and the two must **add up**:
 # dropped_reason: text contains TAB or newline, which the canonical form forbids (dec008)
 ```
 
-All fourteen evidence sheets balance today:
+All fifteen evidence sheets balance today:
 
 | sheet | source_rows | rows | dropped |
 |---|---|---|---|
@@ -456,6 +456,7 @@ All fourteen evidence sheets balance today:
 | re/server/methods | 14,486 | 14,486 | 0 |
 | re/server/callgraph | 3,601 | 3,601 | 0 |
 | re/server/triage | 2,463 | 2,463 | 0 |
+| re/server/localization | 3,699 | 108 | 3,591 |
 | re/assets | 15,135 | 15,135 | 0 |
 
 The row count alone cannot catch a silent loss, because the loss changes the count

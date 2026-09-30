@@ -155,6 +155,16 @@ re_server_fields.artifact	re/server/fields	artifact	string	-	no	-	-	v_full	-
 re_server_fields.ref_addr	re/server/fields	ref_addr	string	-	no	-	-	v_full	-
 re_server_fields.ref_conf	re/server/fields	ref_conf	string	-	no	-	-	v_full	-
 re_server_fields.evidence	re/server/fields	evidence	string	-	no	-	-	v_full	-
+re_server_localization.id	re/server/localization	id	string	-	no	-	-	v_full	-
+re_server_localization.key	re/server/localization	key	string	-	no	-	-	v_full	-
+re_server_localization.section	re/server/localization	section	string	-	no	-	-	v_full	-
+re_server_localization.text	re/server/localization	text	string	-	no	-	-	v_full	-
+re_server_localization.length	re/server/localization	length	u16	-	no	-	-	v_full	-
+re_server_localization.status	re/server/localization	status	string	-	no	-	-	v_full	-
+re_server_localization.artifact	re/server/localization	artifact	string	-	no	-	-	v_full	-
+re_server_localization.ref_addr	re/server/localization	ref_addr	string	-	no	-	-	v_full	-
+re_server_localization.ref_conf	re/server/localization	ref_conf	string	-	no	-	-	v_full	-
+re_server_localization.evidence	re/server/localization	evidence	string	-	no	-	-	v_full	-
 re_server_methods.id	re/server/methods	id	string	-	no	-	-	v_full	-
 re_server_methods.type	re/server/methods	type	string	-	no	-	-	v_full	-
 re_server_methods.name	re/server/methods	name	string	-	no	-	-	v_full	-

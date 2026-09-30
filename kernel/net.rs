@@ -65,8 +65,19 @@ mod mp {
     pub const VERSION_MISMATCH: &str = "LegacyMultiplayer.4";
 }
 
-/// `Netplay.cs:237`: the key the C# sends when there is no free client slot.
-const SERVER_IS_FULL: &str = "CLI.ServerIsFull";
+/// `Netplay.cs:233`: the key the C# sends when there is no free client slot.
+///
+/// Read from the BOOK rather than typed. The row is `cli.serverisfull`, and it is
+/// carried by `sheets::localization` because the CLI section is the first section
+/// of the localization relation. This is the point of that sheet: the string is
+/// now a row like every other value here, so a wrong key is a preflight problem
+/// rather than a hand-typing one, and the test in `lib` pins the lookup so it
+/// cannot quietly degrade into an empty kick.
+fn server_is_full() -> &'static str {
+    crate::sheets::localization::by_id("cli.serverisfull")
+        .expect("cli.serverisfull is a row of re/server/localization")
+        .key
+}
 
 /// `MessageBuffer.cs:165`: ids above 12 that the C# tolerates while a client is still
 /// below `State == 10`. Named from the projection rather than typed as numbers, so each
@@ -248,7 +259,7 @@ pub fn serve(listener: TcpListener, password: Option<String>) -> io::Result<()> 
         if CONNECTED.load(Ordering::SeqCst) >= max {
             let mut s = stream;
             let mut body = Vec::new();
-            let _ = write_kick_key(&mut body, SERVER_IS_FULL);
+            let _ = write_kick_key(&mut body, server_is_full());
             let _ = write_packet(&mut s, port::terraria::id::MessageID::Kick, &body);
             println!("{addr} was booted: ServerIsFull");
             continue;
