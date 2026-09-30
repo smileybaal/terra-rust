@@ -159,6 +159,62 @@ pub fn sanitise_life(stat_life: i16, stat_life_max: i16) -> LifeMana {
     }
 }
 
+/// `Player.cs:5255` `FindBuffIndex`: where a buff sits, or -1.
+///
+/// Two rules are easy to miss and are both reproduced:
+///
+/// 1. An IMMUNE buff is never found, even when it is held: `buffImmune[type]` returns
+///    -1 before the search runs.
+/// 2. A slot must still have `buffTime >= 1`, so a slot with a type but no time left
+///    is invisible. Checking the type alone would find expired buffs.
+pub fn find_buff_index(
+    buff_immune: &[bool],
+    buff_type: &[i32],
+    buff_time: &[i32],
+    buff_type_id: i32,
+) -> i32 {
+    let idx = buff_type_id as usize;
+    if buff_immune.get(idx).copied().unwrap_or(false) {
+        return -1;
+    }
+    let n = MAX_BUFFS.min(buff_type.len()).min(buff_time.len());
+    for i in 0..n {
+        if buff_time[i] >= 1 && buff_type[i] == buff_type_id {
+            return i as i32;
+        }
+    }
+    -1
+}
+
+/// `Player.cs:53240`: `int num = (int)((float)amount * manaCost);`
+///
+/// A float multiply and a truncating cast, so `7 * 0.5` costs 3, not 4. Rounding
+/// here would desynchronise the client's prediction from the server's deduction.
+///
+/// One honest divergence: C#'s `(int)` cast is unchecked and can wrap, while `as i32`
+/// in Rust saturates. The difference is only reachable for a `manaCost` far outside
+/// any real one, since real costs are ratios near 1.
+pub fn mana_cost(amount: i32, mana_cost: f32) -> i32 {
+    (amount as f32 * mana_cost) as i32
+}
+
+/// `Player.cs:53236` `CheckMana`, the part that needs no item state.
+///
+/// Returns whether the cost is affordable, and the mana left after paying. The C#
+/// also has a `manaFlower` / `QuickMana` path and a `DebugOptions.ManaV2` path; both
+/// need state this slice does not have (restorable mana potions, a debug flag), so
+/// they are NOT reproduced here and are recorded as pending rather than guessed at.
+/// `slowMagicUse` is likewise a field write left to the caller.
+pub fn check_mana(stat_mana: i32, amount: i32, mana_cost_ratio: f32, pay: bool) -> (bool, i32) {
+    let cost = mana_cost(amount, mana_cost_ratio);
+    if stat_mana >= cost {
+        (true, if pay { stat_mana - cost } else { stat_mana })
+    } else {
+        // Not affordable: the C# returns before deducting, so `pay` changes nothing.
+        (false, stat_mana)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,5 +377,56 @@ mod tests {
         assert!(sanitise_life(-5, 100).dead, "negative life is dead");
         assert_eq!(sanitise_life(-5, 100).stat_life, -5, "the value is stored, not fixed");
         assert!(!sanitise_life(i16::MAX, 100).dead);
+    }
+
+    /// Immunity wins over presence, and an expired slot is invisible.
+    #[test]
+    fn find_buff_index_respects_immunity_and_time() {
+        let mut immune = [false; 16];
+        let mut types = [0i32; MAX_BUFFS];
+        let mut times = [0i32; MAX_BUFFS];
+        types[3] = 12;
+        times[3] = 600;
+        assert_eq!(find_buff_index(&immune, &types, &times, 12), 3);
+        assert_eq!(find_buff_index(&immune, &types, &times, 99), -1, "absent");
+
+        // Immune: present, and still not found.
+        immune[12] = true;
+        assert_eq!(find_buff_index(&immune, &types, &times, 12), -1, "immune wins");
+        immune[12] = false;
+
+        // Expired: the type is still set, the time is not, so it is not held.
+        times[3] = 0;
+        assert_eq!(find_buff_index(&immune, &types, &times, 12), -1, "expired is invisible");
+        times[3] = 1;
+        assert_eq!(find_buff_index(&immune, &types, &times, 12), 3, "one tick left still counts");
+
+        // Outside the immunity array is not immune: the C# would throw, this does not.
+        let empty_immune: [bool; 0] = [];
+        assert_eq!(find_buff_index(&empty_immune, &types, &times, 12), 3);
+    }
+
+    /// The cost truncates rather than rounds, which is what keeps the client's
+    /// prediction and the server's deduction in step.
+    #[test]
+    fn mana_cost_truncates() {
+        assert_eq!(mana_cost(10, 1.0), 10);
+        assert_eq!(mana_cost(10, 0.5), 5);
+        assert_eq!(mana_cost(7, 0.5), 3, "3.5 truncates to 3, it does not round");
+        assert_eq!(mana_cost(1, 0.5), 0, "0.5 truncates to 0");
+        assert_eq!(mana_cost(0, 1.0), 0);
+        assert_eq!(mana_cost(100, 1.0), 100);
+    }
+
+    /// Affordability, and the deduction only happening when the cost is affordable.
+    #[test]
+    fn check_mana_pays_only_when_affordable() {
+        assert_eq!(check_mana(100, 10, 1.0, false), (true, 100), "a check does not pay");
+        assert_eq!(check_mana(100, 10, 1.0, true), (true, 90));
+        assert_eq!(check_mana(10, 10, 1.0, true), (true, 0), "exactly enough is affordable");
+        assert_eq!(check_mana(9, 10, 1.0, true), (false, 9), "not enough, and nothing is deducted");
+        assert_eq!(check_mana(0, 10, 1.0, false), (false, 0));
+        // A free spell is always affordable, at any mana.
+        assert_eq!(check_mana(0, 50, 0.0, true), (true, 0));
     }
 }
