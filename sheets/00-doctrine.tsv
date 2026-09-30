@@ -22,3 +22,5 @@ d12	target_sha256	960a03bff6050cf7be16dfc1a7b19e10fc2c4f8f835a6a3b135a50dd9e6ba2
 d13	legal	see decisions.tsv	do not distribute reverse-engineered artifacts (MDD 8.10)
 d14	determinism	unverified	D9: RNG ground truth not yet captured; blocks parity work
 d15	blast_radius_budget	one sheet module + registry + owning crate	MDD 5.9 success criterion
+d16	target_server	re/binaries/TerrariaServer.exe	second Mode B subject; 2958 types, of which 5 are server-only
+d17	target_server_sha256	328872c65a4a7a94f050ead1566f1567af15c3193d4d7008a460507d3686d7c2	provenance root for server-side claims

@@ -19,3 +19,6 @@ src_ilspy_structs	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_s.tx
 src_ilspy_enums	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_e.txt	-	evidence	done	-	-	-	170 enums
 src_ilspy_ifaces	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_i.txt	-	evidence	done	-	-	-	93 interfaces
 src_ilspy_delegates	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_entities_d.txt	-	evidence	done	-	-	-	94 delegates
+src_server_binary	binary	-	-	re/binaries/TerrariaServer.exe	328872c65a4a7a94f050ead1566f1567af15c3193d4d7008a460507d3686d7c2	subject	done	-	-	-	second Mode B subject: the dedicated server assembly
+src_ilspy_server_tree	csharp_tree	ilspycmd	9.1.0.7988	re/exports/ilspy_server	-	evidence	done	ilspy_server	TerrariaServer	ilspycmd -p --nested-directories; 1551 .cs files, 22.1 MB	second Mode B subject
+src_ilspy_server_entities	entity_list	ilspycmd	9.1.0.7988	re/exports/ilspy_server_entities_c.txt	-	evidence	done	-	-	-	2229 classes, 368 structs, 170 enums, 97 interfaces, 94 delegates (2958 total)

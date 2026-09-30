@@ -82,6 +82,15 @@ re_methods.artifact	re/methods	artifact	string	-	no	-	-	v_full	-
 re_methods.ref_addr	re/methods	ref_addr	string	-	no	-	-	v_full	-
 re_methods.ref_conf	re/methods	ref_conf	string	-	no	-	-	v_full	-
 re_methods.evidence	re/methods	evidence	string	-	no	-	-	v_full	-
+re_platform_split.id	re/platform_split	id	string	-	no	-	-	v_full	-
+re_platform_split.type	re/platform_split	type	string	-	no	-	-	v_full	-
+re_platform_split.kind	re/platform_split	kind	string	-	no	-	-	v_full	-
+re_platform_split.in_client	re/platform_split	in_client	u8	-	no	-	-	v_full	-
+re_platform_split.in_server	re/platform_split	in_server	u8	-	no	-	-	v_full	-
+re_platform_split.reason	re/platform_split	reason	string	-	no	-	-	v_full	-
+re_platform_split.ref_addr	re/platform_split	ref_addr	string	-	no	-	-	v_full	-
+re_platform_split.ref_conf	re/platform_split	ref_conf	string	-	no	-	-	v_full	-
+re_platform_split.evidence	re/platform_split	evidence	string	-	no	-	-	v_full	-
 re_sources.id	re/sources	id	string	-	no	-	-	v_full	-
 re_sources.kind	re/sources	kind	string	-	no	-	-	v_full	-
 re_sources.tool	re/sources	tool	string	-	no	-	-	v_full	-
