@@ -13,10 +13,12 @@ row projects mechanically to a strut.
 **Where it stands:** the evidence is complete and preflight-clean, and the server
 port **compiles** - 126,315 lines of Rust across 5 emitted modules, projected
 from 46,989 rows of server evidence. Every generated body is a stub, so the port
-carries the server's *shape*; the kernel is where behaviour goes, and it now holds
-the first piece of it: the listener, the packet framing and the `Hello` handshake
-(`kernel/net.rs`), which a real client completes. See
-[Status](#status-what-is-and-is-not-done) before reading further.
+carries the server's *shape*; the kernel is where behaviour goes, and it holds the
+first three pieces of it: the listener, the packet framing and the `Hello` handshake
+(`kernel/net.rs`), which a real client completes; the `SyncPlayer` message in both
+directions (`kernel/player.rs`); and a world file reader (`kernel/worldfile.rs`,
+`kernel/tiles.rs`) that lands byte-exactly on the section pointers of two real
+worlds. See [Status](#status-what-is-and-is-not-done) before reading further.
 
 ## Mode
 
