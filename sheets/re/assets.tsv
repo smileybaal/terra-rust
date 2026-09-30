@@ -10,8 +10,9 @@
 # source_rows: 15135
 # dropped: 0
 # dropped_reason: -
-# Content inventory. Source is the Path/Width/Height manifest embedded in the
-# binary itself, cross-checked against re/content.
+# Content inventory, SHARED by both binaries: the client and the server load the
+# same Content directory. Source is the Path/Width/Height manifest embedded in
+# Terraria.exe, cross-checked against re/content.
 # id_form: compound
 id:string*	path:string	size:u64	sha256:string	loader:string	status:string	ref_addr:string	ref_conf:string	evidence:string
 images_acc_back_1	Images/Acc_Back_1	1700	4ccbddd8ca9bd03aef2fc215769803c383e89d38dac1bc0949997621717815a8	xnb	found	0x00d8e817	certain	embedded Path/Width/Height manifest; dims 40x1120

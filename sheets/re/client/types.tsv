@@ -1,16 +1,21 @@
-# sheet: re/types
+# sheet: re/client/types
 # version: 1
 # generator: types
-# target: sheets/re
+# target: sheets/re/client
 # index: by_id
 # requires: re/sources
 # owned_by: extractor
 # doctrine: D1
 # evidence: required
-# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.
+# Managed type inventory for the client binary, from ILSpy.
+# kind is class|struct|enum|interface|delegate.
 # Type ids are dotted namespace paths, so the compound-key exception is declared.
 # emit: rust
 # id_form: compound
+# key_alias: re/server/types,re/server/triage
+# The two platform inventories are DIFFERENT RELATIONS OVER THE SAME TYPE IDS.
+# That is the point: overlapping them is how client-only and server-only types
+# are found, so check 13 is exempted rather than the ids being namespaced apart.
 # source_rows: 2960
 # dropped: 1411
 # dropped_reason: compiler-generated types have no emitted .cs file (dec010); resource shims were also absent from the inventory comparison

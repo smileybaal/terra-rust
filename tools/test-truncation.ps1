@@ -6,6 +6,9 @@
 #   W-L7-ROWCOUNT  the count moved badly against the last commit (check 28)
 #   E-L5-DIVERGE   the sheet no longer balances against its producer (check 24)
 #
+# The client's triage sheet is used because it is large (1549 rows) and committed.
+# Any sheet with a committed baseline works; if it moves, update $target.
+#
 # This truncates a real workbook sheet, asserts W-L7-ROWCOUNT fires, and restores
 # the file. It writes LF without a BOM, because writing with a BOM or CRLF would
 # corrupt the canonical form and the test would fail for the wrong reason - which
@@ -16,7 +19,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
-$target = "sheets/re/triage.tsv"
+$target = "sheets/re/client/triage.tsv"
 $bak = "re/exports/_trunc.bak"
 
 if (-not (Test-Path $target)) { throw "missing $target" }

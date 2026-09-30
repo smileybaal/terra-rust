@@ -1,15 +1,18 @@
-# sheet: re/methods
+# sheet: re/client/methods
 # version: 1
 # generator: methods
-# target: sheets/re
+# target: sheets/re/client
 # index: by_id
-# requires: re/types,re/sources
+# requires: re/client/types,re/sources
 # owned_by: extractor
 # doctrine: D1
 # evidence: required
-# Managed method inventory from ILSpy. ids are lowercased dotted paths;
-# the compound key joins type and method with '.', so id_form is declared.
+# Managed method inventory for the client binary, from ILSpy.
+# ids are lowercased dotted paths; the compound key joins type and
+# method with '.', so id_form is declared.
 # id_form: compound
+# key_alias: re/server/methods
+# Shares its key space with the other platform's method inventory by design.
 # source_rows: 14052
 # dropped: 0
 # dropped_reason: -

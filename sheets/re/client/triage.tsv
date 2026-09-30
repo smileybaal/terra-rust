@@ -1,20 +1,20 @@
-# sheet: re/triage
+# sheet: re/client/triage
 # version: 1
 # generator: triage_managed
-# target: sheets/re
+# target: sheets/re/client
 # index: by_id
-# requires: re/types
+# requires: re/client/types
 # owned_by: extractor
 # doctrine: D1
 # evidence: required
-# Porting-order work queue, scored from MEASURED managed evidence.
+# Porting-order work queue for the client binary, scored from MEASURED evidence.
 # MDD 8.5 scores log(size) and xrefs; both are unavailable because Ghidra
 # decoded no code (dec013), so this scores fields and methods per type,
 # which ILSpy measured exactly. ref_conf is 'probable': the counts are
 # certain, the choice of them as a size proxy is a judgement.
-# This sheet is keyed by re/types.id on purpose: one triage annotation
+# This sheet is keyed by re/client/types.id on purpose: one triage annotation
 # per type, so preflight check 13 is exempted via key_alias.
-# key_alias: re/types
+# key_alias: re/client/types,re/server/types,re/server/triage
 # id_form: compound
 # source_rows: 1549
 # dropped: 0

@@ -1415,12 +1415,30 @@ impl Overlap {
     }
 }
 
+/// Columns that carry provenance or bookkeeping rather than domain data. They are
+/// excluded from the divergence comparison, because two relations over the same
+/// domain legitimately disagree about *where* a value came from while agreeing
+/// about the value. Comparing them made every shared row of re/client/types and
+/// re/server/types look divergent (artifact paths differ by platform prefix),
+/// which reported "covered 0" for 1,546 identical types.
+///
+/// This is the MDD 5.4 reserved-column set minus `id`, which is the join key.
+const RESERVED_COLS: &[&str] = &[
+    "kind", "status", "artifact", "ref_src", "ref_addr", "ref_conf", "evidence", "notes", "tok",
+];
+
 pub fn overlap(a: &Sheet, b: &Sheet) -> Overlap {
     let akeys: BTreeSet<String> = a.rows.iter().map(|r| a.row_key(r)).collect();
     let bkeys: BTreeSet<String> = b.rows.iter().map(|r| b.row_key(r)).collect();
     let mut o = Overlap { spec: a.name.clone(), imp: b.name.clone(), ..Default::default() };
 
-    let shared: Vec<&Column> = a.columns.iter().filter(|c| b.col_index(&c.name).is_some() && c.name != "id").collect();
+    let shared: Vec<&Column> = a
+        .columns
+        .iter()
+        .filter(|c| {
+            b.col_index(&c.name).is_some() && c.name != "id" && !RESERVED_COLS.contains(&c.name.as_str())
+        })
+        .collect();
 
     for k in &akeys {
         if bkeys.contains(k) {

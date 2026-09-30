@@ -32,6 +32,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 EXPORTS = os.path.join(ROOT, "re", "exports", "ghidra")
 
+# Ghidra analysed Terraria.exe only, so these sheets describe the CLIENT binary and
+# live beside the other client evidence. The server has no Ghidra evidence yet:
+# adding it means importing TerrariaServer.exe into its own project and re-running
+# this script with a second output directory.
+CLIENT_OUT = os.path.join(ROOT, "sheets", "re", "client")
+
 
 # ---------------------------------------------------------------------------
 # content root
@@ -143,8 +149,8 @@ disassembly request fails with "No instruction at address". Consequently:
         ])
 
     header = (
-        manifest("re/functions", "functions", "re/sources",
-                 "CLI-managed symbol inventory from Ghidra. One row per symbol record.\n# dec013: instructions=0, so size/calls/called_by are NOT code measurements.",
+        manifest("re/client/functions", "functions", "re/sources",
+                 "CLI-managed symbol inventory from Ghidra for the CLIENT binary.\n# One row per symbol record.\n# dec013: instructions=0, so size/calls/called_by are NOT code measurements.",
                  extra="\n".join([
                      f"# source_rows: {len(funcs)}",
                      f"# dropped: {len(rows) - len({r[0] for r in rows})}",
@@ -153,7 +159,7 @@ disassembly request fails with "No instruction at address". Consequently:
                  ])) +
         "id:string*\tname:string\taddr:string\tsize:u32\tcalls:u16\tcalled_by:u16\ttags:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     )
-    n = write(os.path.join(ROOT, "sheets", "re", "functions.tsv"), header, rows)
+    n = write(os.path.join(CLIENT_OUT, "functions.tsv"), header, rows)
     print(f"functions          {n}   (symbol records, status=symbol_only)")
     print(f"interesting hits   {len(inter_addrs)}   (note: no code, so proximity is not meaningful)")
     return n
@@ -194,8 +200,8 @@ def do_types() -> int:
             tid = f"{tid}_{n}"
         rows.append([f"pe.{tid}", kind, size, name, path, "typemgr"])
     header = (
-        manifest("re/types_pe", "types_pe", "re/sources",
-                 "PE-side data type inventory from Ghidra's data type manager.\n# This is NOT the managed type inventory; that is re/types.tsv (ILSpy).\n# id_form: compound",
+        manifest("re/client/types_pe", "types_pe", "re/sources",
+                 "PE-side data type inventory from Ghidra's data type manager, for the CLIENT binary.\n# This is NOT the managed type inventory; that is re/client/types.tsv (ILSpy).\n# id_form: compound",
                  evidence="none",
                  extra="\n".join([
                      f"# source_rows: {len(items)}",
@@ -205,7 +211,7 @@ def do_types() -> int:
                  ])) +
         "id:string*\tkind:string\tsize:string\tname:string\tpath:string\tartifact:string\n"
     )
-    n = write(os.path.join(ROOT, "sheets", "re", "types_pe.tsv"), header, rows)
+    n = write(os.path.join(CLIENT_OUT, "types_pe.tsv"), header, rows)
     print(f"pe types           {n}")
     return n
 
@@ -249,8 +255,8 @@ def do_strings() -> int:
             f"ghidra find string; length={length}",
         ])
     header = (
-        manifest("re/strings", "strings", "re/sources",
-                 "String table from Ghidra. Rows whose text contains TAB or newline are\n# excluded (dec008).",
+        manifest("re/client/strings", "strings", "re/sources",
+                 "String table from Ghidra for the CLIENT binary. Rows whose text contains TAB\n# or newline are excluded (dec008).",
                  extra="\n".join([
                      f"# source_rows: {len(strings)}",
                      f"# dropped: {excluded + (len(rows) - len({r[0] for r in rows}))}",
@@ -258,7 +264,7 @@ def do_strings() -> int:
                  ])) +
         "id:string*\taddr:string\ttext:string\tlength:u16\tx_refs:u16\tuse:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
     )
-    n = write(os.path.join(ROOT, "sheets", "re", "strings.tsv"), header, rows)
+    n = write(os.path.join(CLIENT_OUT, "strings.tsv"), header, rows)
     print(f"strings            {n}   (excluded for TAB/newline: {excluded})")
     return n
 
@@ -330,7 +336,7 @@ def do_assets() -> int:
         ])
     header = (
         manifest("re/assets", "assets", "re/sources",
-                 "Content inventory. Source is the Path/Width/Height manifest embedded in the\n# binary itself, cross-checked against re/content.\n# id_form: compound",
+                 "Content inventory, SHARED by both binaries: the client and the server load the\n# same Content directory. Source is the Path/Width/Height manifest embedded in\n# Terraria.exe, cross-checked against re/content.\n# id_form: compound",
                  extra="\n".join([
                      f"# source_rows: {parsed}",
                      f"# dropped: {parsed - len({r[0] for r in rows})}",
@@ -378,6 +384,8 @@ def main() -> int:
     if not os.path.isdir(EXPORTS):
         print("no ghidra exports dir", file=sys.stderr)
         return 1
+    # the client evidence directory may not exist yet if this runs before synth_ilspy
+    os.makedirs(CLIENT_OUT, exist_ok=True)
     do_functions()
     do_types()
     do_strings()

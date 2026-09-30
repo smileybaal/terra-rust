@@ -1,4 +1,4 @@
-# sheet: re/functions
+# sheet: re/client/functions
 # version: 1
 # generator: functions
 # target: sheets/re
@@ -10,7 +10,8 @@
 # source_rows: 18300
 # dropped: 0
 # dropped_reason: -
-# CLI-managed symbol inventory from Ghidra. One row per symbol record.
+# CLI-managed symbol inventory from Ghidra for the CLIENT binary.
+# One row per symbol record.
 # dec013: instructions=0, so size/calls/called_by are NOT code measurements.
 id:string*	name:string	addr:string	size:u32	calls:u16	called_by:u16	tags:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
 fn_00402051	get_Count	0x00402051	7	0	0	managed_name	symbol_only	ghidra/functions.json	0x00402051	certain	ghidra CLI symbol record; NO instructions decoded (dec013), so size=7 is a metadata record length, not code size

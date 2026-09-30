@@ -1,9 +1,9 @@
-# sheet: re/callgraph
+# sheet: re/client/callgraph
 # version: 1
 # generator: callgraph_managed
-# target: sheets/re
+# target: sheets/re/client
 # index: by_id
-# requires: re/types
+# requires: re/client/types
 # owned_by: extractor
 # doctrine: D1
 # evidence: required
@@ -14,6 +14,8 @@
 # decompiled C# declarations: base/interface -> inherits, a type named in a
 # method signature -> uses. Ambiguous short names are skipped, not guessed.
 # id_form: compound
+# key_alias: re/server/callgraph
+# Shares its key space with the other platform's edge set by design.
 # source_rows: 2212
 # dropped: 0
 # dropped_reason: the same (from,to,kind) triple seen more than once folds to one edge

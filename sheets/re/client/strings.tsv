@@ -1,4 +1,4 @@
-# sheet: re/strings
+# sheet: re/client/strings
 # version: 1
 # generator: strings
 # target: sheets/re
@@ -10,8 +10,8 @@
 # source_rows: 21159
 # dropped: 78
 # dropped_reason: text contains TAB or newline, which the canonical form forbids (dec008)
-# String table from Ghidra. Rows whose text contains TAB or newline are
-# excluded (dec008).
+# String table from Ghidra for the CLIENT binary. Rows whose text contains TAB
+# or newline are excluded (dec008).
 id:string*	addr:string	text:string	length:u16	x_refs:u16	use:string	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
 str_00dec27b	0x00dec27b	@.reloc	9	0	unknown	identified	ghidra/strings_all.json	0x00dec27b	certain	ghidra find string; length=9
 str_00df8f88	0x00df8f88	#Strings	12	0	unknown	identified	ghidra/strings_all.json	0x00df8f88	certain	ghidra find string; length=12

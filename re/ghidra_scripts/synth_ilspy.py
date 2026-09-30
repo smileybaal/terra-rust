@@ -27,6 +27,32 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXPORTS = os.path.join(ROOT, "re", "exports")
 
+# The two managed subjects. They get completely separate sheet sets rather than a
+# shared set plus a delta: the client and the server are different binaries, so
+# they are different relations, and a relation per binary is what keeps a query
+# like "which types does the server have and the client not" a plain overlap
+# instead of a hand-maintained list that can rot.
+TARGETS = [
+    {
+        "label": "client",
+        "prefix": "ilspy",            # re/exports/ilspy_entities_*.txt
+        "tree": "ilspy",              # re/exports/ilspy/**/*.cs
+        "base": "re/client",          # sheet names: re/client/types, ...
+        "out": os.path.join(ROOT, "sheets", "re", "client"),
+    },
+    {
+        "label": "server",
+        "prefix": "ilspy_server",
+        "tree": "ilspy_server",
+        "base": "re/server",
+        "out": os.path.join(ROOT, "sheets", "re", "server"),
+    },
+]
+
+# Set per target by main() before scanning.
+PREFIX = TARGETS[0]["prefix"]
+TREE = TARGETS[0]["tree"]
+
 # ---------------------------------------------------------------------------
 # canonical writers
 # ---------------------------------------------------------------------------
@@ -89,7 +115,7 @@ ENTITY_KIND = {
 def read_entities() -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for key, kind in ENTITY_KIND.items():
-        p = os.path.join(EXPORTS, f"ilspy_entities_{key}.txt")
+        p = os.path.join(EXPORTS, f"{PREFIX}_entities_{key}.txt")
         if not os.path.exists(p):
             continue
         with open(p, encoding="utf-8", errors="replace") as f:
@@ -198,7 +224,7 @@ RESERVED_WORDS = {
 
 def cs_files() -> list[str]:
     out = []
-    base = os.path.join(EXPORTS, "ilspy")
+    base = os.path.join(EXPORTS, TREE)
     for dirpath, _, names in os.walk(base):
         for n in names:
             if n.endswith(".cs"):
@@ -207,7 +233,7 @@ def cs_files() -> list[str]:
 
 
 def rel_artifact(path: str) -> str:
-    return "ilspy/" + os.path.relpath(path, os.path.join(EXPORTS, "ilspy")).replace("\\", "/")
+    return f"{TREE}/" + os.path.relpath(path, os.path.join(EXPORTS, TREE)).replace("\\", "/")
 
 
 def ghidra_edge_count():
@@ -495,24 +521,43 @@ def scan() -> tuple[list[list[str]], list[list[str]], dict]:
     return types_rows, methods_rows, triage_rows, callgraph_rows, stats
 
 
-def main() -> int:
-    if not os.path.isdir(EXPORTS):
-        print(f"no exports dir at {EXPORTS}", file=sys.stderr)
-        return 1
+def emit_target(t: dict) -> int:
+    """Produce the four managed sheets for one binary into its own directory."""
+    global PREFIX, TREE
+    PREFIX = t["prefix"]
+    TREE = t["tree"]
+    base = t["base"]
+    out = t["out"]
+    label = t["label"]
+
+    tree_dir = os.path.join(EXPORTS, TREE)
+    if not os.path.isdir(tree_dir):
+        print(f"{label:7} SKIPPED: no decompiled tree at re/exports/{TREE}")
+        return 0
+
+    other = next((x["base"] for x in TARGETS if x["label"] != label), base)
+
+    os.makedirs(out, exist_ok=True)
     types_rows, methods_rows, triage_rows, callgraph_rows, stats = scan()
 
-    tpath = os.path.join(ROOT, "sheets", "re", "types.tsv")
-    mpath = os.path.join(ROOT, "sheets", "re", "methods.tsv")
-    gpath = os.path.join(ROOT, "sheets", "re", "callgraph.tsv")
-    trpath = os.path.join(ROOT, "sheets", "re", "triage.tsv")
+    types_name = f"{base}/types"
+    methods_name = f"{base}/methods"
+    graph_name = f"{base}/callgraph"
+    triage_name = f"{base}/triage"
+    target_dir = f"sheets/re/{label}"
 
     theader = manifest(
-        "re/types", "types", "sheets/re", "re/sources", "D1",
+        types_name, "types", target_dir, "re/sources", "D1",
         extra=(
-            "# Managed type inventory from ILSpy. kind is class|struct|enum|interface|delegate.\n"
+            f"# Managed type inventory for the {label} binary, from ILSpy.\n"
+            "# kind is class|struct|enum|interface|delegate.\n"
             "# Type ids are dotted namespace paths, so the compound-key exception is declared.\n"
             "# emit: rust\n"
             "# id_form: compound\n"
+            f"# key_alias: {other}/types,{other}/triage\n"
+            "# The two platform inventories are DIFFERENT RELATIONS OVER THE SAME TYPE IDS.\n"
+            "# That is the point: overlapping them is how client-only and server-only types\n"
+            "# are found, so check 13 is exempted rather than the ids being namespaced apart.\n"
             f"# source_rows: {stats['entity_count']}\n"
             f"# dropped: {stats['entity_count'] - stats['uniq_types']}\n"
             "# dropped_reason: compiler-generated types have no emitted .cs file (dec010); resource "
@@ -521,71 +566,77 @@ def main() -> int:
     ) + "id:string*\tkind:string\tnamespace:string\tname:string\tfields:u16\tbase:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
 
     mheader = manifest(
-        "re/methods", "methods", "sheets/re", "re/types,re/sources", "D1",
+        methods_name, "methods", target_dir, f"{types_name},re/sources", "D1",
         extra=(
-            "# Managed method inventory from ILSpy. ids are lowercased dotted paths;\n"
-            "# the compound key joins type and method with '.', so id_form is declared.\n"
+            f"# Managed method inventory for the {label} binary, from ILSpy.\n"
+            "# ids are lowercased dotted paths; the compound key joins type and\n"
+            "# method with '.', so id_form is declared.\n"
             "# id_form: compound\n"
+            f"# key_alias: {other}/methods\n"
+            "# Shares its key space with the other platform's method inventory by design.\n"
             f"# source_rows: {stats['methods']}\n"
             f"# dropped: {stats['methods'] - stats['uniq_methods']}\n"
             "# dropped_reason: -"
         ),
     ) + "id:string*\ttype:string\tname:string\tsignature:string\tkind:string\til_offset:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
 
-    nt = write_tsv(tpath, theader, types_rows)
-    nm = write_tsv(mpath, mheader, methods_rows)
-
-    # re/callgraph.tsv is owned by the managed producer, because it is the only
-    # producer that can see edges on this target (dec013).
     gec, gnc = ghidra_edge_count()
     gheader = manifest(
-        "re/callgraph", "callgraph_managed", "sheets/re", "re/types", "D1",
+        graph_name, "callgraph_managed", target_dir, f"{types_name}", "D1",
         extra=(
             "# Edges. Cycles here are informative, not errors: SCCs are usually subsystems.\n"
-            f"# PROVENANCE: Ghidra contributed none of these. `ghidra graph calls` returned\n"
+            "# PROVENANCE: Ghidra contributed none of these. `ghidra graph calls` returned\n"
             f"# edge_count={gec} over node_count={gnc} because Ghidra decoded 0 instructions\n"
             "# for this managed binary (dec013). The edges are derived instead from the\n"
             "# decompiled C# declarations: base/interface -> inherits, a type named in a\n"
             "# method signature -> uses. Ambiguous short names are skipped, not guessed.\n"
             "# id_form: compound\n"
+            f"# key_alias: {other}/callgraph\n"
+            "# Shares its key space with the other platform's edge set by design.\n"
             f"# source_rows: {stats['edge_candidates']}\n"
             f"# dropped: {stats['edge_candidates'] - stats['uniq_edges']}\n"
             "# dropped_reason: the same (from,to,kind) triple seen more than once folds to one edge"
         ),
     ) + "id:string*\tfrom:string\tto:string\tkind:string\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
-    ng = write_tsv(gpath, gheader, callgraph_rows)
 
     trheader = manifest(
-        "re/triage", "triage_managed", "sheets/re", "re/types", "D1",
+        triage_name, "triage_managed", target_dir, f"{types_name}", "D1",
         extra=(
-            "# Porting-order work queue, scored from MEASURED managed evidence.\n"
+            f"# Porting-order work queue for the {label} binary, scored from MEASURED evidence.\n"
             "# MDD 8.5 scores log(size) and xrefs; both are unavailable because Ghidra\n"
             "# decoded no code (dec013), so this scores fields and methods per type,\n"
             "# which ILSpy measured exactly. ref_conf is 'probable': the counts are\n"
             "# certain, the choice of them as a size proxy is a judgement.\n"
-            "# This sheet is keyed by re/types.id on purpose: one triage annotation\n"
+            f"# This sheet is keyed by {types_name}.id on purpose: one triage annotation\n"
             "# per type, so preflight check 13 is exempted via key_alias.\n"
-            "# key_alias: re/types\n"
+            f"# key_alias: {types_name},{other}/types,{other}/triage\n"
             "# id_form: compound\n"
             f"# source_rows: {stats['records']}\n"
             f"# dropped: {stats['records'] - stats['uniq_triage']}\n"
             "# dropped_reason: -"
         ),
     ) + "id:string*\treason:string\tscore:f32\tpriority:u8\tstatus:string\tref_addr:string\tref_conf:string\tevidence:string\n"
-    ntr = write_tsv(trpath, trheader, triage_rows)
 
-    print(f"files scanned      {stats['files']}")
-    print(f"types              {nt}")
-    print(f"methods            {nm}")
-    print(f"callgraph edges    {ng}   (ambiguous short names skipped: {stats['ambiguous_short_names']})")
-    print(f"triage             {ntr}   (from measured fields/methods, not Ghidra size)")
-    print(f"fields (counted)   {stats['fields']}")
-    print(f"ctors              {stats['ctors']}")
-    print(f"properties         {stats['props']}")
-    print(f"multi-type files   {stats['multi']}")
-    print(f"unmatched entities {stats['unmatched_types']} (in inventory, no file matched)")
-    print(f"skipped files      {stats['skipped']}")
+    nt = write_tsv(os.path.join(out, "types.tsv"), theader, types_rows)
+    nm = write_tsv(os.path.join(out, "methods.tsv"), mheader, methods_rows)
+    ng = write_tsv(os.path.join(out, "callgraph.tsv"), gheader, callgraph_rows)
+    ntr = write_tsv(os.path.join(out, "triage.tsv"), trheader, triage_rows)
+
+    print(f"{label:7} files {stats['files']:5}  types {nt:5}  methods {nm:6}  "
+          f"edges {ng:5}  triage {ntr:5}  fields {stats['fields']:6}  "
+          f"(ambiguous shorts skipped {stats['ambiguous_short_names']})")
+    print(f"{label:7} unmatched inventory entries: {stats['unmatched_types']}")
     return 0
+
+
+def main() -> int:
+    if not os.path.isdir(EXPORTS):
+        print(f"no exports dir at {EXPORTS}", file=sys.stderr)
+        return 1
+    rc = 0
+    for t in TARGETS:
+        rc |= emit_target(t)
+    return rc
 
 
 if __name__ == "__main__":

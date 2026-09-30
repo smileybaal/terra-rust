@@ -1,4 +1,4 @@
-# sheet: re/types_pe
+# sheet: re/client/types_pe
 # version: 1
 # generator: types_pe
 # target: sheets/re
@@ -10,8 +10,8 @@
 # source_rows: 68272
 # dropped: 4
 # dropped_reason: sanitized names folded together (see the name column)
-# PE-side data type inventory from Ghidra's data type manager.
-# This is NOT the managed type inventory; that is re/types.tsv (ILSpy).
+# PE-side data type inventory from Ghidra's data type manager, for the CLIENT binary.
+# This is NOT the managed type inventory; that is re/client/types.tsv (ILSpy).
 # id_form: compound
 id:string*	kind:string	size:string	name:string	path:string	artifact:string
 pe.array	struct	9	Array	/PE/CLI/Types/Array	typemgr
