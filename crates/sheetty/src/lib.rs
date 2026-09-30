@@ -1557,41 +1557,45 @@ pub fn human_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]
     let _ = writeln!(out);
 
     for layer in ["L0", "L1", "L2", "L3"] {
-        let mut shown = 0usize;
-        let mut total = 0usize;
-        for f in findings {
-            if f.code.starts_with(&format!("E-{layer}")) || f.code.starts_with(&format!("W-{layer}")) {
-                total += 1;
-                if shown < 12 {
-                    let sev = if f.is_error() { "E" } else { "W" };
-                    let _ = writeln!(out, "      {sev} {}", f.code);
-                    let _ = writeln!(
-                        out,
-                        "        {}:{}  {}{}{}  {}",
-                        f.sheet,
-                        f.line,
-                        f.row,
-                        if f.col.is_empty() { "" } else { " " },
-                        f.col,
-                        f.message
-                    );
-                    shown += 1;
-                }
-            }
-        }
         let name = match layer {
             "L0" => "L0 structural",
             "L1" => "L1 types",
             "L2" => "L2 refs",
             _ => "L3 coverage",
         };
-        if total == 0 && layer != "L3" {
-            let _ = writeln!(out, "  {name} ................ ok");
-        } else if layer != "L3" {
-            let _ = writeln!(out, "  {name} .............. {total} finding(s)");
-            if total > shown {
-                let _ = writeln!(out, "      ... +{} more", total - shown);
+        let matched: Vec<&Finding> = findings
+            .iter()
+            .filter(|f| {
+                f.code.starts_with(&format!("E-{layer}")) || f.code.starts_with(&format!("W-{layer}"))
+            })
+            .collect();
+        let total = matched.len();
+        // The summary line labels the details under it, so it is written first. Writing it
+        // after them made every heading read as though it belonged to the block BELOW, and
+        // disagreed with the L4-L7 block, which has always led with its heading.
+        if layer != "L3" {
+            if total == 0 {
+                let _ = writeln!(out, "  {name} ................ ok");
+            } else {
+                let _ = writeln!(out, "  {name} .............. {total} finding(s)");
             }
+        }
+        for f in matched.iter().take(12) {
+            let sev = if f.is_error() { "E" } else { "W" };
+            let _ = writeln!(out, "      {sev} {}", f.code);
+            let _ = writeln!(
+                out,
+                "        {}:{}  {}{}{}  {}",
+                f.sheet,
+                f.line,
+                f.row,
+                if f.col.is_empty() { "" } else { " " },
+                f.col,
+                f.message
+            );
+        }
+        if total > 12 {
+            let _ = writeln!(out, "      ... +{} more", total - 12);
         }
     }
 
