@@ -1,4 +1,4 @@
-"""Find any file in terraria-port that matches any file in the Terraria install.
+"""Find any file in terra-rust that matches any file in the Terraria install.
 
 The rule is: a copy of a game file is never committed, and ideally never present.
 Three kinds of match are reported, weakest first, because "matches" should not be

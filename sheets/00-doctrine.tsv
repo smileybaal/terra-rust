@@ -7,7 +7,7 @@
 # owned_by: architect
 # doctrine: D1,D4,D7,D8
 id:string*	key:string	value:string	notes:string?
-d01	project	terraria-port	-
+d01	project	terra-rust	-
 d02	mode	B	Mode B: binary only; no official source release exists
 d03	doctrine_version	1.0	MDD 2026-09-29
 d04	emitter_version	1	sheetty v0.1.0

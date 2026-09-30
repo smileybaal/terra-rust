@@ -1,4 +1,4 @@
-# terraria-port - reproducing the pipeline
+# terra-rust - reproducing the pipeline
 
 Everything below is runnable from a clean checkout. Raw producer output is not
 committed (`re/exports/**` is gitignored); the *evidence sheets* are, because

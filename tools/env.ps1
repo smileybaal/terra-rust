@@ -17,5 +17,5 @@ $env:DOTNET_ROLL_FORWARD = "LatestMajor"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 
 $root = Split-Path -Parent $PSScriptRoot
-Write-Host "terraria-port root: $root"
+Write-Host "terra-rust root: $root"
 Write-Host "GHIDRA_INSTALL_DIR: $env:GHIDRA_INSTALL_DIR"
