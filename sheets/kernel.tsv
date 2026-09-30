@@ -23,3 +23,4 @@ k0001	module	lib	done	-	the kernel crate root: includes the generated port from 
 k0002	module	args	done	-	mirrors Terraria.Utils.ParseArguements; inline tests cover the flag, value and duplicate rules (dec020)
 k0003	module	boot	done	-	mirrors Terraria.Program.LaunchGame as far as a stub port allows; inline tests
 k0004	build	build	done	-	the MDD 5.6 emit shim: runs the pipeline, emits the port and the per-sheet modules, hash-gated
+k0005	module	net	done	-	the server's entry path, hand-written from the decompiled C#: accept, packet framing, the Hello handshake, the two state guards; inline socket tests

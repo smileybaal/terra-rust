@@ -39,6 +39,7 @@ pub mod sheets {
 
 pub mod args;
 pub mod boot;
+pub mod net;
 
 #[cfg(test)]
 mod tests {

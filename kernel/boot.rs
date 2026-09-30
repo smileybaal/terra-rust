@@ -4,12 +4,15 @@
 //! resolve the save directory (`-savedirectory` or the platform storage path),
 //! raise the thread-pool floor to 8, set up logging, then run.
 //!
-//! What it CANNOT mirror is the run itself. `LaunchGame` ends in `RunGame`, which
-//! sets `Main.dedServ = true` and calls `main.DedServ()` then `main.Run()`. In this
-//! port those are generated stubs whose bodies are `unimplemented!()`, because the
-//! sheets carry the server's SHAPE and not its behaviour. So this reports the shape
-//! it found and says plainly that it is not serving, rather than printing a banner
-//! that implies otherwise.
+//! What it COULD NOT mirror was the run itself: `LaunchGame` ends in `RunGame`, which
+//! sets `Main.dedServ = true` and calls `main.DedServ()` then `main.Run()`, and those
+//! are generated stubs whose bodies are `unimplemented!()`, because the sheets carry
+//! the server's SHAPE and not its behaviour.
+//!
+//! So this reports the shape it found and then hands the machine to `net`, where the
+//! behaviour now begins: the listener, the packet framing and the C# handshake. It
+//! says plainly how far that goes, because a banner implying more than the port can do
+//! is worse than no banner at all.
 
 use crate::args::{self, LaunchParameters};
 use crate::port;
@@ -169,17 +172,51 @@ pub fn run(argv: &[String]) -> i32 {
     }
     println!();
 
-    // Say what is actually true. A generated body is `unimplemented!()`, so calling
-    // into the server would panic rather than serve.
-    println!("NOT SERVING. This build is the projected SHAPE of the server:");
-    println!("  {} types, {} members and {} methods, projected from", 
-        sheets::registry::rows_in("re/server/types").unwrap_or(0),
-        sheets::registry::rows_in("re/server/fields").unwrap_or(0),
-        sheets::registry::rows_in("re/server/methods").unwrap_or(0));
-    println!("  sheets/re/server/{{types,fields,methods}}.tsv into crates of Rust.");
-    println!("  Every generated body is a stub. Behaviour is the kernel's job and has");
-    println!("  not been written yet.");
-    0
+    // The entry path is implemented now (`kernel/net.rs`), so this serves instead of
+    // reporting. What is implemented is everything up to and including the handshake;
+    // what is not is everything after it, and the module says which message is missing
+    // on every kick rather than leaving a client to wait for one that will not come.
+    println!("serving: the entry path is implemented (accept, framing, Hello handshake).");
+    println!("  after the handshake this build has nothing: world loading, tile sending");
+    println!("  and the game loop are not written, so such a client is kicked by name");
+    println!("  rather than left hanging (kernel/net.rs).");
+    println!();
+
+    // `LaunchInitializer.LoadSharedParameters` reads the port from `-p` / `-port`
+    // (LaunchInitializer.cs:30); `-pass` / `-password` sets `Netplay.ServerPassword`
+    // (LaunchInitializer.cs:44).
+    let listen_port = match params.get("-port").or_else(|| params.get("-p")) {
+        Some(v) => match v.trim().parse::<u16>() {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("-port {v:?} is not a port number");
+                return 1;
+            }
+        },
+        None => port::terraria::Netplay::DefaultPort as u16,
+    };
+    let password = params
+        .get("-password")
+        .or_else(|| params.get("-pass"))
+        .map(str::to_string)
+        .filter(|p| !p.is_empty());
+
+    let listener = match crate::net::bind(listen_port) {
+        Ok(l) => l,
+        Err(e) => {
+            // `Netplay.InitializeServer` reports exactly this when the bind fails.
+            eprintln!("Tried to run two servers on the same PC ({e})");
+            return 1;
+        }
+    };
+    println!("listening on 0.0.0.0:{listen_port}");
+    match crate::net::serve(listener, password) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("server loop stopped: {e}");
+            1
+        }
+    }
 }
 
 #[cfg(test)]
@@ -254,8 +291,23 @@ mod tests {
         assert_eq!(types.1, "2463");
     }
 
+    /// `run` now SERVES, so it has no "returns zero" case left to assert: the process
+    /// that starts listening does not come back, which is the point. What can be
+    /// asserted is every branch that REFUSES to start, and those are checked here. The
+    /// serving path itself is covered by `net`'s socket tests, which drive it over a
+    /// real socket on a port the OS chose.
     #[test]
-    fn running_reports_and_exits_zero() {
-        assert_eq!(run(&v(&["-savedirectory", "x"])), 0);
+    fn an_unusable_port_refuses_to_start() {
+        assert_eq!(run(&v(&["-port", "not-a-port"])), 1);
+    }
+
+    /// A port already in use is the C# "Tried to run two servers on the same PC" path.
+    /// It must report and return, not panic and not hang.
+    #[test]
+    fn a_port_already_in_use_refuses_to_start() {
+        let taken = crate::net::bind(0).unwrap();
+        let port = taken.local_addr().unwrap().port().to_string();
+        assert_eq!(run(&v(&["-port", port.as_str()])), 1);
+        drop(taken);
     }
 }

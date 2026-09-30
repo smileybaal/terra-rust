@@ -29,6 +29,37 @@ if (-not (Test-Path "tests/sweep/sheets")) {
     if ($LASTEXITCODE -ne 0) { throw "tools/make-bad-sheets.py failed; the sweep fixture is not there" }
 }
 
+# A sweep is only as good as the bytes it is run against. E-L0-EOL is proved by
+# crlf.tsv holding a real CR, and canonical form (preflight check 2) requires every
+# other fixture to hold none. A checkout can silently destroy both, and the failure
+# then looks like a broken RULE rather than a broken fixture:
+#   - the committed tests/sweep/sheets/crlf.tsv blob is LF, so its -text attribute
+#     cannot restore the CR until the file is re-added - with the documented
+#     core.autocrlf=input the sweep then reports "E-L0-EOL did not fire";
+#   - with core.autocrlf=true (the Git-for-Windows default, which is not cloned)
+#     every OTHER fixture comes out CRLF, so E-L0-EOL fires on files that are not
+#     its fixture and the sweep passes for the wrong reason.
+# Assert the preconditions loudly instead of trusting the checkout.
+$fixtureDir = "tests/sweep/sheets"
+$crlfFixture = Join-Path $fixtureDir "crlf.tsv"
+if (-not (Test-Path $crlfFixture)) { throw "missing fixture $crlfFixture" }
+if (-not ([System.IO.File]::ReadAllBytes($crlfFixture) -contains 13)) {
+    throw ("$crlfFixture holds no CR, so the E-L0-EOL fixture is inert and this sweep proves nothing. " +
+           "The committed blob is LF; restore the file's CRLF bytes (its -text rule in .gitattributes " +
+           "keeps them once the blob holds them) before trusting this result.")
+}
+$rewritten = @()
+foreach ($f in (Get-ChildItem $fixtureDir -Recurse -File -Filter *.tsv)) {
+    if ($f.Name -eq "crlf.tsv") { continue }
+    if ([System.IO.File]::ReadAllBytes($f.FullName) -contains 13) { $rewritten += $f.Name }
+}
+if ($rewritten.Count -gt 0) {
+    throw ("{0} fixture(s) hold CR, which canonical form forbids: {1}. The checkout rewrote them, so " -f `
+           $rewritten.Count, ($rewritten -join ", ")) +
+           "E-L0-EOL would fire on the wrong files. Set core.autocrlf=input (or pin '*.tsv text eol=lf' " +
+           "in .gitattributes before its -text rules) before trusting this sweep."
+}
+
 $exe = Get-SheettyExe
 
 $json = $null

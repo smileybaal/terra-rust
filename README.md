@@ -12,8 +12,10 @@ row projects mechanically to a strut.
 
 **Where it stands:** the evidence is complete and preflight-clean, and the server
 port **compiles** - 126,315 lines of Rust across 5 emitted modules, projected
-from 46,989 rows of server evidence. The generated bodies are stubs: this is the
-server's *shape*, not its behaviour. See
+from 46,989 rows of server evidence. Every generated body is a stub, so the port
+carries the server's *shape*; the kernel is where behaviour goes, and it now holds
+the first piece of it: the listener, the packet framing and the `Hello` handshake
+(`kernel/net.rs`), which a real client completes. See
 [Status](#status-what-is-and-is-not-done) before reading further.
 
 ## Mode
@@ -94,7 +96,7 @@ cargo run -p sheetty-cli -- pack v_server_types --rows 1..900   # ad-hoc row win
 
 cargo build -p terraria-server             # the Rust server: generated shape + hand-written kernel
 cargo run -p terraria-server -- -savedirectory C:\saves
-cargo test -p terraria-kernel              # 19 tests over the port and the kernel
+cargo test -p terraria-kernel              # 27 tests over the port, the kernel and the net entry path
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 
 python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
@@ -133,7 +135,7 @@ whole 125 MB assembly regardless of `-t`).
 |---|---|
 | targets | `Terraria.exe` (client) `960a03bf...`; `TerrariaServer.exe` (server) `328872c6...`; both PE32 i386 .NET CLI assemblies |
 | sheets | 24 |
-| rows | 229,260 |
+| rows | 229,261 |
 | columns | 224 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
 | preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
@@ -142,7 +144,7 @@ whole 125 MB assembly regardless of `-t`).
 | server evidence (ILSpy) | 2,463 types, 30,040 members, 14,486 methods, 3,601 edges |
 | client vs server | 2,458 shared, 6 client-only, 5 server-only, 2 divergent |
 | Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders; 126,315 lines across 5 emitted modules |
-| Rust kernel (hand-written) | `kernel/{lib,args,boot}.rs`, all listed in `kernel.tsv`; 19 tests |
+| Rust kernel (hand-written) | `kernel/{lib,args,boot,net}.rs`, all listed in `kernel.tsv`; 27 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 
@@ -170,18 +172,18 @@ discriminant on `AchievementCategory::None == -1`. Nested types project as sibli
 modules, which is why module names are lowercased: `mod player` and `struct Player`
 coexist.
 
-What the port is NOT: behaviour. Every generated body is `unimplemented!()`. It is
-the server's shape at a fidelity the sheets can prove, and `terraria-server` says so
-when it runs rather than printing a banner that implies it is serving:
+What the port is NOT: the whole of the behaviour. Every generated body is
+`unimplemented!()`, so the port carries the server's shape at a fidelity the sheets
+can prove. The kernel is where behaviour goes, and the entry path is written:
+`kernel/net.rs` listens, frames packets and runs the `Hello` handshake. It says
+exactly how far that goes rather than printing a banner that claims more:
 
 ```
-$ cargo run -p terraria-server -- -savedirectory C:\saves
+$ crates/terraria-server/Terra-Rust_Server.exe
 terraria-server (Rust port of TerrariaServer.exe)
 
-launch parameters: 1
-  -savedirectory = C:\saves
-
-save directory: C:\saves
+launch parameters: 0
+save directory: C:\Users\PORTMANTEAU\Documents\My Games\Terraria
 thread pool floor: 8
 
 the port knows:
@@ -194,8 +196,20 @@ the port knows:
   methods projected            14486
   inventory rows               2463
 
-NOT SERVING. This build is the projected SHAPE of the server.
+serving: the entry path is implemented (accept, framing, Hello handshake).
+  after the handshake this build has nothing: world loading, tile sending
+  and the game loop are not written, so such a client is kicked by name
+  rather than left hanging (kernel/net.rs).
+
+listening on 0.0.0.0:7777
+Server started
+127.0.0.1:56481 is connecting...
+kicked (LegacyMultiplayer.4) because wrong greeting
 ```
+
+A client that completes the handshake is answered with `PlayerInfo`; one that sends
+a wrong greeting is kicked with the localization key `LegacyMultiplayer.4`, the same
+key the C# passes as `Lang.mp[4]`, so the client localizes the sentence itself.
 
 Three things the projection does that are worth knowing, because each is a recorded
 decision rather than an accident:
@@ -214,9 +228,10 @@ decision rather than an accident:
 
 `kernel/` is the hand-written half. `args.rs` mirrors `Utils.ParseArguements` with
 one recorded divergence (dec020: C# throws on a repeated flag, this keeps the first
-value and reports the repeat). `boot.rs` mirrors `Program.LaunchGame` as far as a
-stub port allows. Both are listed in `sheets/kernel.tsv`, because D4 allows exactly
-two kinds of file: rows, and listed kernel modules.
+value and reports the repeat). `boot.rs` mirrors `Program.LaunchGame`, then hands
+the machine to `net.rs`, which implements the server's entry path from the same
+decompiled source. All three are listed in `sheets/kernel.tsv`, because D4 allows
+exactly two kinds of file: rows, and listed kernel modules.
 
 ## Status: what is and is not done
 
@@ -228,17 +243,24 @@ Done, and verified:
   emitter.
 - The client/server split derived by query rather than maintained by hand.
 - The Rust server port generated from the sheets and **compiling**, with the
-  hand-written kernel mirroring the real entry point.
+  hand-written kernel mirroring the real entry point and **serving** it: a real
+  client completes the `Hello` handshake and a wrong greeting is refused with the
+  localization key the C# uses.
 
 Not done, and not pretended otherwise:
 
-- **The port has no behaviour.** All 14,486 generated method bodies are stubs. The
-  kernel is a boot report, not a server loop.
+- **The port has almost no behaviour.** All 14,486 generated method bodies are
+  stubs, and the kernel implements the entry path only: accept, framing, `Hello`.
+  Everything after the handshake - world loading, tile sending, the game loop - is
+  not written, so a client that reaches it is kicked by name instead of served.
 - **Ghidra analysed the client only.** The server has no `functions`, `strings` or
   `types_pe` sheets (dec015, t0007), so nothing in this repository says what
   `TerrariaServer.exe`'s native surface looks like.
 - **No parity traces yet.** `re/traces/` is empty, so nothing here proves the port
-  behaves like the original - only that it has the original's shape.
+  behaves like the original - only that it has the original's shape. The entry path
+  is the one exception so far: it is written from the decompiled source and asserted
+  over a real socket by `kernel/net.rs`, but that is a test, not a recorded trace of
+  a real run.
 - **No client port.** Only the server is projected; the client is evidence only.
 - **One MDD preflight check is absent** (dead-column detection, check 26) because a
   generic emitter consumes every column, so the rule could only ever pass. It is
