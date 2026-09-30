@@ -141,10 +141,10 @@ def describe(mid: int, body: bytes, names: dict[int, str]) -> list[tuple[str, st
             out.append(("slot", str(slot)))
         if flag is not None:
             out.append(("serverSpecialFlags[2]", str(bool(flag))))
-    elif mid == 4:  # State: one byte
+    elif mid == 4:  # SyncPlayer: MessageBuffer.cs:248 passes the client's own slot
         v = r.byte()
         if v is not None:
-            out.append(("state", str(v)))
+            out.append(("slot", str(v)))
     if out and not r.eof():
         out.append(("_trailing", f"{len(body) - r.off} undecoded byte(s)"))
     return out
@@ -165,6 +165,7 @@ class Tally:
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
+        self.connections = 0
         self.counts: dict[str, collections.Counter] = {
             "C->S": collections.Counter(),
             "S->C": collections.Counter(),
@@ -173,6 +174,19 @@ class Tally:
     def add(self, direction: str, name: str) -> None:
         with self.lock:
             self.counts[direction][name] += 1
+
+    def note_connection(self) -> None:
+        with self.lock:
+            self.connections += 1
+
+    def summary(self) -> str:
+        """A one-line liveness summary, so an idle proxy is distinguishable
+        from a hung one. Silence here means nobody is connected, which is the
+        normal state while waiting for a client."""
+        with self.lock:
+            c2s = sum(self.counts["C->S"].values())
+            s2c = sum(self.counts["S->C"].values())
+            return f"connections={self.connections}  C->S={c2s}  S->C={s2c}"
 
     def report(self) -> str:
         lines = []
@@ -241,6 +255,17 @@ def pump(src: socket.socket, dst: socket.socket, direction: str, names, tally, q
                 pass
 
 
+def heartbeat(tally: Tally, interval: float, stop: threading.Event) -> None:
+    """Print a liveness line every `interval` seconds until asked to stop.
+
+    A proxy waiting for a client is silent by definition, which is
+    indistinguishable from a hung process to anything watching it. This says
+    "alive, and here is the running tally" on a timer instead.
+    """
+    while not stop.wait(interval):
+        print(f"mitm: alive   {tally.summary()}", flush=True)
+
+
 def parse_addr(text: str) -> tuple[str, int]:
     host, _, port = text.rpartition(":")
     if not host or not port.isdigit():
@@ -255,6 +280,8 @@ def main() -> int:
     ap.add_argument("--target", type=parse_addr, default=("127.0.0.1", 1738),
                     help="host:port of the real server (default 127.0.0.1:1738)")
     ap.add_argument("--quiet", action="store_true", help="count packets but print none")
+    ap.add_argument("--heartbeat", type=float, default=30.0, metavar="SECONDS",
+                    help="print a liveness line this often; 0 disables (default 30)")
     args = ap.parse_args()
 
     names = load_message_names()
@@ -269,9 +296,14 @@ def main() -> int:
     print(f"mitm: {args.listen[0]}:{args.listen[1]} -> {args.target[0]}:{args.target[1]}"
           f"   ({len(names)} message names from the book)", flush=True)
 
+    stop = threading.Event()
+    if args.heartbeat > 0:
+        threading.Thread(target=heartbeat, args=(tally, args.heartbeat, stop), daemon=True).start()
+
     try:
         while True:
             client, addr = listener.accept()
+            tally.note_connection()
             print(f"\n--- {addr[0]}:{addr[1]} connected ---", flush=True)
             try:
                 upstream = socket.create_connection(args.target, timeout=10)
@@ -292,6 +324,7 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nmitm: stopping", flush=True)
     finally:
+        stop.set()
         listener.close()
         report = tally.report()
         if report:
