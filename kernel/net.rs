@@ -20,19 +20,63 @@
 //! `writer.Write("Terraria" + 326)` (NetMessage.cs:142) and as the comparison in
 //! `reader.ReadString() == "Terraria" + 326` (MessageBuffer.cs:203).
 //!
-//! WHAT IS NOT IMPLEMENTED, and is therefore named rather than hidden: everything
-//! after the handshake. There is no world loading, no tile sending and no game loop,
-//! so a client that gets past `Hello` is kicked with a LITERAL message that says this
-//! port has not implemented that message yet. That is a DELIBERATE divergence from the
-//! C#, where such a client would be served, and it is reported out loud for the same
+//! WHAT IS IMPLEMENTED after the handshake: the world is LOADED at startup and the
+//! opening of the world transfer is SERVED. `RequestWorldData` (6) is answered with
+//! `WorldData` (7), and `RequestTileData` (8) with `StatusTextSize` (9), the fifteen tile
+//! sections around the spawn point (10), and - once the client says it has spawned -
+//! `PlayerSpawn` (12). That is the path `MessageBuffer.cs:670-875` walks.
+//!
+//! WHAT IS NOT: everything after it. The C# follows the sections with the world's items,
+//! NPCs, projectiles, banners, the creative-power state and the pylon network
+//! (`MessageBuffer.cs:843-874`), and none of those are sent, so a client that connects
+//! gets a world with no entities in it. Chests and signs travel inside the tile sections
+//! and are empty for the same reason: their sections of the `.wld` are not decoded yet.
+//! A message this port has no handler for is still answered with a LITERAL kick naming it,
+//! which is a DELIBERATE divergence from the C#, and it is reported out loud for the same
 //! reason `boot` used to refuse to print a banner it could not back up.
 
 use std::io::{self, Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 
 use crate::port;
+
+/// The world this server hands to clients, plus the two runtime tables the wire needs.
+///
+/// The tiles are held decoded, which is the one place this port spends memory the way the
+/// native server does: `Main.tile` is a 20-million-entry array in the C# too, and a server
+/// that is going to send a section cannot avoid having the tiles in hand. `boot` loads this
+/// once at startup and every connection shares it through an `Arc`, so the cost is paid
+/// once rather than per client.
+pub struct ServedWorld {
+    pub world: crate::worldfile::LoadedWorld,
+    /// The tiles, indexed by `tiles::at`.
+    pub tiles: Vec<crate::tiles::Tile>,
+    /// `TileID.Sets.AllowsSaveCompressionBatching`, sized to `TileID.Count`.
+    pub allows_batching: Vec<bool>,
+}
+
+/// `TileID.Sets.AllowsSaveCompressionBatching` (`TileID.cs:155`):
+/// `Factory.CreateBoolSet(true, 520, 423, 723, 724)`, and `CreateBoolSet(defaultState,
+/// types)` (`SetFactory.cs:92`) fills the whole array with `defaultState` and then flips
+/// the listed types. So the rule is "every tile batches except these four", and that rule
+/// is what is written here rather than a table of 700 hand-typed booleans.
+///
+/// The array's length is `TileID.Count`, which the book has no value for - but the world
+/// container's importance table IS `TileID.Count` bits long (`SaveFileFormatHeader` writes
+/// `TileID.Count` and then that many bits), so the length is taken from the world being
+/// served instead of being invented.
+pub fn allows_save_compression_batching(count: usize) -> Vec<bool> {
+    let mut v = vec![true; count];
+    for id in [520usize, 423, 723, 724] {
+        if id < count {
+            v[id] = false;
+        }
+    }
+    v
+}
 
 /// The protocol version, from the projection: `Main.curRelease` is a ROW in
 /// `sheets/re/server/fields.tsv` (`terraria.main.currelease`, value 326), and the port
@@ -262,7 +306,7 @@ pub fn bind(port: u16) -> io::Result<TcpListener> {
 /// instead of a thread per client. That is a scheduling difference, not a protocol
 /// one: nothing on the wire depends on it, and at this stage of the port a thread per
 /// connection is the smaller thing to be right about.
-pub fn serve(listener: TcpListener, password: Option<String>) -> io::Result<()> {
+pub fn serve(listener: TcpListener, password: Option<String>, world: Option<Arc<ServedWorld>>) -> io::Result<()> {
     println!("Server started"); // CLI.ServerStarted
     let max = port::terraria::Netplay::MaxConnections as usize;
     for incoming in listener.incoming() {
@@ -289,8 +333,9 @@ pub fn serve(listener: TcpListener, password: Option<String>) -> io::Result<()> 
         }
         CONNECTED.fetch_add(1, Ordering::SeqCst);
         let pw = password.clone();
+        let w = world.clone();
         thread::spawn(move || {
-            let r = client_loop(stream, pw);
+            let r = client_loop(stream, pw, w);
             CONNECTED.fetch_sub(1, Ordering::SeqCst);
             if let Err(e) = r {
                 eprintln!("{addr}: {e}");
@@ -305,7 +350,11 @@ pub fn serve(listener: TcpListener, password: Option<String>) -> io::Result<()> 
 /// The state machine is `MessageBuffer.HandleMessage` as far as the handshake, and the
 /// two guards in front of it are copied from `MessageBuffer.cs:163-173` rather than
 /// invented, because they are what stops a client skipping the handshake.
-fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()> {
+fn client_loop(
+    mut stream: TcpStream,
+    password: Option<String>,
+    world: Option<Arc<ServedWorld>>,
+) -> io::Result<()> {
     let mut state: i32 = 0;
     // The name from `SyncPlayer` (4). The C# stores it on the client's slot
     // (`Netplay.Clients[whoAmI].Name`) and uses it for the duplicate-name check; there is
@@ -404,6 +453,161 @@ fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()
             return not_implemented(&mut stream, id);
         }
 
+        // `MessageBuffer.cs:462-472`, case 6 `RequestWorldData`: the handshake is done and
+        // the client wants the world. The state moves 1 -> 2 and the world goes out.
+        if id == port::terraria::id::MessageID::RequestWorldData {
+            if state == 1 {
+                state = 2;
+            }
+            let w = match &world {
+                Some(w) => w,
+                None => return kick_literal(&mut stream, NO_WORLD, "RequestWorldData with no world loaded"),
+            };
+            let mut body = Vec::new();
+            crate::worlddata::write_world_data(
+                &mut body,
+                &crate::worlddata::WorldFacts {
+                    header: &w.world.header,
+                    flags: &w.world.flags,
+                    runtime: crate::worlddata::Runtime::default(),
+                },
+            );
+            write_packet(&mut stream, crate::worlddata::WORLD_DATA, &body)?;
+            println!(
+                "world data for {:?}: {} bytes ({}x{}, spawn ({}, {}), surface {}, rock {})",
+                name.as_deref().unwrap_or("<unnamed>"),
+                body.len(),
+                w.world.header.max_tiles_x,
+                w.world.header.max_tiles_y,
+                w.world.header.spawn_tile_x,
+                w.world.header.spawn_tile_y,
+                w.world.header.world_surface,
+                w.world.header.rock_layer,
+            );
+            continue;
+        }
+
+        // `MessageBuffer.cs:664-875`, case 8 `RequestTileData`: the client asks for the
+        // tiles around where it is going to appear. The reply is a status line, the 5x3
+        // block of sections around the spawn, and - after that - whatever the client does
+        // next.
+        if id == port::terraria::id::MessageID::SpawnTileData {
+            let w = match &world {
+                Some(w) => w,
+                None => return kick_literal(&mut stream, NO_WORLD, "RequestTileData with no world loaded"),
+            };
+            let h = &w.world.header;
+            // The body is the tile the client would rather spawn at and a team/style byte
+            // (`MessageBuffer.cs:671-673`). It is read so the stream is where the C#
+            // expects, and the position is used only for the OPTIONAL extra block the C#
+            // sends when the client asks for somewhere other than the spawn; this port
+            // sends the spawn block only, which is what a client joining a server does.
+            let mut r = Cursor::new(&body[..]);
+            let mut four = [0u8; 4];
+            let mut requested = None;
+            if r.read_exact(&mut four).is_ok() {
+                let x = i32::from_le_bytes(four);
+                if r.read_exact(&mut four).is_ok() {
+                    requested = Some((x, i32::from_le_bytes(four)));
+                }
+            }
+
+            // `Netplay.GetSectionX/Y` (`Netplay.cs:814-822`): 200 wide, 150 tall.
+            let section_x = h.spawn_tile_x / 200;
+            let section_y = h.spawn_tile_y / 150;
+            let max_x = h.max_tiles_x / 200;
+            let max_y = h.max_tiles_y / 150;
+            // `MessageBuffer.cs:692-711`: two sections left of the spawn and one above it,
+            // five across and three down, clamped to the world.
+            let from_x = (section_x - 2).max(0);
+            let from_y = (section_y - 1).max(0);
+            let to_x = (section_x + 3).min(max_x);
+            let to_y = (section_y + 2).min(max_y);
+            let status_max = (to_x - from_x) * (to_y - from_y);
+
+            if state == 2 {
+                state = 3; // MessageBuffer.cs:807-810
+            }
+            let mut status = Vec::new();
+            crate::worlddata::write_status_text_size(
+                &mut status,
+                status_max,
+                crate::worlddata::RECEIVING_TILE_DATA_KEY,
+                0,
+            );
+            write_packet(&mut stream, crate::worlddata::STATUS_TEXT_SIZE, &status)?;
+
+            let mut sent = 0i32;
+            let mut bytes = 0usize;
+            for sx in from_x..to_x {
+                for sy in from_y..to_y {
+                    let x_start = sx * 200;
+                    let y_start = sy * 150;
+                    // The section is 200x150 and the world's section grid divides it
+                    // exactly, but the clamp is here so a world whose size is not a
+                    // multiple of 200 still sends something rather than erroring mid-send.
+                    let width = 200.min(h.max_tiles_x - x_start);
+                    let height = 150.min(h.max_tiles_y - y_start);
+                    let mut body = Vec::new();
+                    match crate::tiles::write_tile_section(
+                        &mut body,
+                        &w.tiles,
+                        h.max_tiles_y,
+                        x_start,
+                        y_start,
+                        width,
+                        height,
+                        &w.world.container.importance,
+                        &w.allows_batching,
+                        &[],
+                        &[],
+                    ) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            eprintln!("section ({sx}, {sy}) could not be built: {e:?}");
+                            return not_implemented(&mut stream, id);
+                        }
+                    }
+                    write_packet(&mut stream, crate::worlddata::TILE_SECTION, &body)?;
+                    sent += 1;
+                    bytes += body.len();
+                }
+            }
+            println!(
+                "tile sections: {sent} of {status_max} ({} bytes) around spawn section ({section_x}, {section_y})",
+                bytes
+            );
+            match requested {
+                Some((x, y)) => println!("  the client asked for ({x}, {y}); only the spawn block was sent"),
+                None => println!("  the client's request was short; only the spawn block was sent"),
+            }
+            // The C# follows the sections with the world's items, NPCs, projectiles,
+            // banners, creative powers and pylons (`MessageBuffer.cs:843-874`). None of
+            // those are sent, and saying so is the difference between a client that knows
+            // what it is missing and one that looks at an empty world.
+            println!("  not sent: items, NPCs, projectiles, banners, creative powers, pylons");
+            continue;
+        }
+
+        // `MessageBuffer.cs:901-950`, case 12 `PlayerSpawn`: the client says it has
+        // spawned. At State 3 that is what moves it to 10, which is the state the C#
+        // requires before it will accept the gameplay messages.
+        if id == port::terraria::id::MessageID::PlayerSpawn {
+            let slot = body.first().copied().unwrap_or(0);
+            if state == 3 {
+                state = 10;
+                println!("player spawn (slot {slot} on the wire, ignored): state 3 -> 10");
+            } else {
+                println!("player spawn (slot {slot}) at state {state}; ignored");
+            }
+            // The C# relays the spawn to every OTHER client here
+            // (`TrySendData(12, -1, whoAmI, ...)`). There is one connection per client and
+            // no client table yet, so there is nobody to relay to - and the writer that
+            // would do it is `worlddata::write_player_spawn`, tested and waiting for the
+            // client table rather than unused.
+            continue;
+        }
+
         // The password path is NOT written: the C# compares the string against
         // `Netplay.ServerPassword` here (`MessageBuffer.cs:2218`). Accepting it without
         // that comparison would let anyone in, so it is refused by name instead. This is
@@ -456,13 +660,27 @@ fn boot(stream: &mut TcpStream, key: &str, why: &str) -> io::Result<()> {
 /// This port's own notice, and the only message it sends that the C# would not: the
 /// message is named so a client is told what is missing instead of hanging.
 fn not_implemented(stream: &mut TcpStream, id: u8) -> io::Result<()> {
+    kick_literal(
+        stream,
+        &format!("terra-rust: message {id} has no handler yet; this port serves the world and then stops"),
+        &format!("message {id} is not implemented"),
+    )
+}
+
+/// The literal a client gets when the server was started without `-world`.
+///
+/// The C# would not reach this: `LaunchGame` either loads the world named on the command
+/// line or runs the interactive world-select. This port has neither, so a server with no
+/// world says so in words rather than kicking a client with a message about a missing
+/// handler, which would be true but useless.
+const NO_WORLD: &str = "terra-rust: no world is loaded; start the server with -world <path>";
+
+/// Kick with text this port chose, as opposed to a key the game chose.
+fn kick_literal(stream: &mut TcpStream, text: &str, why: &str) -> io::Result<()> {
     let mut body = Vec::new();
-    write_kick_literal(
-        &mut body,
-        &format!("terra-rust: message {id} is not implemented yet; only the handshake is"),
-    )?;
+    write_kick_literal(&mut body, text)?;
     write_packet(stream, port::terraria::id::MessageID::Kick, &body)?;
-    println!("kicked (literal) because message {id} is not implemented");
+    println!("kicked (literal) because {why}");
     Ok(())
 }
 
@@ -580,8 +798,12 @@ mod tests {
         assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::invalid_state());
     }
 
-    /// Past the handshake the port has nothing, and says so with a literal rather than
-    /// leaving the client waiting.
+    /// A body this port cannot read is answered with a literal that NAMES the message,
+    /// rather than leaving the client waiting for a reply that will not come.
+    ///
+    /// The empty `SyncPlayer` is the shortest way to reach it: the reader refuses a body
+    /// that ends early, and `TooShort` has no key in the book, so the notice is this
+    /// port's own.
     #[test]
     fn an_unimplemented_message_is_kicked_by_name() {
         let addr = start(None);
@@ -593,7 +815,10 @@ mod tests {
         assert_eq!(id, port::terraria::id::MessageID::Kick);
         assert_eq!(read_mode_of(&body), 0, "a literal, not a key: it is not a C# string");
         let text = read_string(&mut Crsr::new(&body[1..])).unwrap();
-        assert!(text.contains("not implemented"), "got {text:?}");
+        assert!(
+            text.contains("message 4"),
+            "the notice has to name the message, or a client cannot tell which one: {text:?}"
+        );
     }
 
     /// A password set means the C# goes to `State = -1` and asks, and this port does the
@@ -636,15 +861,103 @@ mod tests {
     }
 
     fn start(password: Option<String>) -> SocketAddr {
+        start_with(password, None)
+    }
+
+    fn start_with(password: Option<String>, world: Option<Arc<ServedWorld>>) -> SocketAddr {
         let l = bind(0).unwrap();
         // 0.0.0.0 is a listen address, not a destination: dialling it is
         // WSAEADDRNOTAVAIL (10049) on Windows. Take the port and dial loopback.
         let port = l.local_addr().unwrap().port();
         let addr: SocketAddr = ([127, 0, 0, 1], port).into();
         thread::spawn(move || {
-            let _ = serve(l, password);
+            let _ = serve(l, password, world);
         });
         addr
+    }
+
+    /// A world small enough to build in a test: 400x300 tiles, which is a 2x2 grid of
+    /// sections, with a spawn that puts the 5x3 block flush against the world's edge so
+    /// the clamping in the section loop is exercised rather than assumed.
+    ///
+    /// It is built by hand rather than read from a `.wld` because a test that needs a file
+    /// on one machine's disk is a test that does not run on another's.
+    fn synthetic_world() -> Arc<ServedWorld> {
+        let max_x = 400i32;
+        let max_y = 300i32;
+        let importance = vec![false; 512];
+        let header = crate::worldfile::WorldHeader {
+            name: "Synthetic".into(),
+            seed: "1".into(),
+            generator_version: 0,
+            unique_id: [7u8; 16],
+            world_id: 99,
+            left_world: 0,
+            right_world: max_x * 16,
+            top_world: 0,
+            bottom_world: max_y * 16,
+            max_tiles_x: max_x,
+            max_tiles_y: max_y,
+            game_mode: 0,
+            drunk_world: false,
+            get_good_world: false,
+            tenth_anniversary_world: false,
+            dont_starve_world: false,
+            not_the_bees_world: false,
+            remix_world: false,
+            no_traps_world: false,
+            zenith_world: false,
+            skyblock_world: false,
+            creation_time_binary: 0,
+            last_played_binary: 0,
+            moon_type: 0,
+            tree_x: [0, 0, 0],
+            tree_style: [0, 0, 0, 0],
+            cave_back_x: [0, 0, 0],
+            cave_back_style: [0, 0, 0, 0],
+            ice_back_style: 0,
+            jungle_back_style: 0,
+            hell_back_style: 0,
+            spawn_tile_x: 100,
+            spawn_tile_y: 150,
+            world_surface: 100.0,
+            rock_layer: 200.0,
+        };
+        let mut flags = crate::worldfile::WorldFlags::default();
+        flags.version = crate::worldfile::KNOWN_VERSION;
+        flags.dungeon_x = 50;
+        flags.dungeon_y = 250;
+        let container = crate::worldfile::Container {
+            version: crate::worldfile::KNOWN_VERSION,
+            revision: 0,
+            favorite: false,
+            positions: vec![0, 0, 0],
+            importance: importance.clone(),
+        };
+        let sections = container
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(i, offset)| crate::worldfile::Section {
+                index: i,
+                name: crate::worldfile::SECTION_NAMES[i],
+                offset: *offset,
+                decoded: i <= 1,
+            })
+            .collect();
+        let world = crate::worldfile::LoadedWorld {
+            container,
+            header,
+            flags,
+            tile_stats: crate::tiles::TileStats::default(),
+            sections,
+        };
+        let tiles = vec![crate::tiles::Tile::empty(); (max_x * max_y) as usize];
+        Arc::new(ServedWorld {
+            allows_batching: allows_save_compression_batching(importance.len()),
+            world,
+            tiles,
+        })
     }
 
     fn send_hello(c: &mut TcpStream, greeting: &str) {
@@ -688,15 +1001,16 @@ mod tests {
         assert_eq!(id, port::terraria::id::MessageID::PlayerInfo);
 
         write_packet(&mut c, port::terraria::id::MessageID::SyncPlayer, &sync_player_body("Probe")).unwrap();
-        // Then ask for the world, which IS unimplemented. If message 4 had been refused
-        // the connection would already be gone and this read would fail.
+        // Then ask for the world. There is no world on this server, so the refusal that
+        // comes back must be about the WORLD, not about message 4 - if SyncPlayer had been
+        // refused the connection would already be gone and this read would fail.
         write_packet(&mut c, port::terraria::id::MessageID::RequestWorldData, &[]).unwrap();
         let (id, body) = read_packet(&mut c).unwrap();
         assert_eq!(id, port::terraria::id::MessageID::Kick);
         let text = read_string(&mut Crsr::new(&body[1..])).unwrap();
         assert!(
-            text.contains("message 6"),
-            "the refusal must be for message 6, not 4: {text:?}"
+            text.contains("no world is loaded"),
+            "the refusal must be about the missing world, not about message 4: {text:?}"
         );
     }
 
@@ -716,12 +1030,98 @@ mod tests {
         }
         // Life and mana, the one the port already sanitises.
         write_packet(&mut c, port::terraria::id::MessageID::PlayerLifeMana, &[100, 0, 100, 0]).unwrap();
-        // None of that may have produced a reply; the world request is what does.
+        // None of that may have produced a reply; the world request is what does. This
+        // server has no world, so what comes back is the no-world kick rather than the
+        // unimplemented-message one.
         write_packet(&mut c, port::terraria::id::MessageID::RequestWorldData, &[]).unwrap();
         let (id, body) = read_packet(&mut c).unwrap();
         assert_eq!(id, port::terraria::id::MessageID::Kick);
         let text = read_string(&mut Crsr::new(&body[1..])).unwrap();
-        assert!(text.contains("message 6"), "got {text:?}");
+        assert!(text.contains("no world is loaded"), "got {text:?}");
+    }
+
+    /// A real client's path, end to end, against a real socket: `Hello`, `SyncPlayer`,
+    /// `RequestWorldData` (6), `RequestTileData` (8), `PlayerSpawn` (12).
+    ///
+    /// This is the test the MITM trace used to be: before it, the only evidence that the
+    /// world was served was that a human ran a game client. Now the four replies are
+    /// asserted here, including the tile sections' count, which is what the client's
+    /// loading bar measures.
+    #[test]
+    fn a_client_is_handed_the_world() {
+        let addr = start_with(None, Some(synthetic_world()));
+        let mut c = connect(addr);
+        send_hello(&mut c, CONNECT_STRING);
+        let (id, _) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::PlayerInfo);
+        write_packet(&mut c, port::terraria::id::MessageID::SyncPlayer, &sync_player_body("Guest")).unwrap();
+
+        // -- 6 -> 7 ---------------------------------------------------------
+        write_packet(&mut c, port::terraria::id::MessageID::RequestWorldData, &[]).unwrap();
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, crate::worlddata::WORLD_DATA, "the world must be the reply to 6");
+        // Read the head of the body the way the client does, and check the fields that
+        // would be catastrophic to get wrong rather than every one of them.
+        let mut r = Crsr::new(&body[..]);
+        let mut four = [0u8; 4];
+        let mut two = [0u8; 2];
+        r.read_exact(&mut four).unwrap();
+        assert_eq!(i32::from_le_bytes(four), 0, "time");
+        r.read_exact(&mut two[..1]).unwrap(); // the day/blood/eclipse bits
+        r.read_exact(&mut two[..1]).unwrap(); // moon phase
+        r.read_exact(&mut two).unwrap();
+        assert_eq!(i16::from_le_bytes(two), 400, "maxTilesX");
+        r.read_exact(&mut two).unwrap();
+        assert_eq!(i16::from_le_bytes(two), 300, "maxTilesY");
+        r.read_exact(&mut two).unwrap();
+        assert_eq!(i16::from_le_bytes(two), 100, "spawnTileX");
+        r.read_exact(&mut two).unwrap();
+        assert_eq!(i16::from_le_bytes(two), 150, "spawnTileY");
+        r.read_exact(&mut two).unwrap();
+        assert_eq!(i16::from_le_bytes(two), 100, "worldSurface");
+        r.read_exact(&mut two).unwrap();
+        assert_eq!(i16::from_le_bytes(two), 200, "rockLayer");
+        r.read_exact(&mut four).unwrap();
+        assert_eq!(i32::from_le_bytes(four), 99, "worldId");
+        assert_eq!(read_string(&mut r).unwrap(), "Synthetic");
+
+        // -- 8 -> 9, then the sections --------------------------------------
+        let mut ask = Vec::new();
+        ask.extend_from_slice(&100i32.to_le_bytes());
+        ask.extend_from_slice(&150i32.to_le_bytes());
+        ask.push(0);
+        write_packet(&mut c, port::terraria::id::MessageID::SpawnTileData, &ask).unwrap();
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, crate::worlddata::STATUS_TEXT_SIZE);
+        assert_eq!(
+            i32::from_le_bytes(body[0..4].try_into().unwrap()),
+            4,
+            "a 400x300 world is 2x2 sections, and the status total is the section count"
+        );
+        assert_eq!(body[4], crate::worlddata::NETWORK_TEXT_LOCALIZATION_KEY);
+        assert_eq!(
+            read_string(&mut Crsr::new(&body[5..])).unwrap(),
+            crate::worlddata::RECEIVING_TILE_DATA_KEY
+        );
+        for n in 0..4 {
+            let (id, body) = read_packet(&mut c).unwrap();
+            assert_eq!(id, crate::worlddata::TILE_SECTION, "section {n}");
+            assert!(!body.is_empty(), "a section is never empty");
+        }
+
+        // -- 12: the client has spawned, so the state moves to 10 -------------
+        write_packet(&mut c, port::terraria::id::MessageID::PlayerSpawn, &[0, 100, 0, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
+        // The proof that it moved is the NEXT message: id 20 is above 12, so at State 3
+        // the guard would boot it with `Net.InvalidState`. Getting the unimplemented
+        // literal instead means the state guard let it through, i.e. State >= 10.
+        write_packet(&mut c, 20, &[]).unwrap();
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::Kick);
+        let text = read_string(&mut Crsr::new(&body[1..])).unwrap();
+        assert!(
+            text.contains("message 20"),
+            "State must have reached 10, or this would be the invalid-state kick: {text:?}"
+        );
     }
 
     /// A name the book refuses is refused with the book's OWN key, not a literal.

@@ -98,7 +98,7 @@ cargo run -p sheetty-cli -- pack v_server_types --rows 1..900   # ad-hoc row win
 
 cargo build -p terraria-server             # the Rust server: generated shape + hand-written kernel
 cargo run -p terraria-server -- -savedirectory C:\saves
-cargo test -p terraria-kernel              # 90 tests over the port, the kernel and the net entry path
+cargo test -p terraria-kernel              # 104 tests over the port, the kernel and the net entry path
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 
 python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
@@ -153,7 +153,7 @@ whole 125 MB assembly regardless of `-t`).
 |---|---|
 | targets | `Terraria.exe` (client) `960a03bf...`; `TerrariaServer.exe` (server) `328872c6...`; both PE32 i386 .NET CLI assemblies |
 | sheets | 25 |
-| rows | 229,438 |
+| rows | 229,439 |
 | columns | 234 |
 | preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan, and **13 of those 16 units not done** (the other 3 are `n/a`: a dedicated server never draws, plays a sound or opens a menu) |
 | preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
@@ -162,7 +162,7 @@ whole 125 MB assembly regardless of `-t`).
 | server evidence (ILSpy) | 2,463 types, 30,040 members, 14,486 methods, 3,601 edges |
 | client vs server | 2,458 shared, 6 client-only, 5 server-only, 2 divergent |
 | Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders; 126,315 lines across 5 emitted modules |
-| Rust kernel (hand-written) | `kernel/{lib,args,boot,net,player,tiles,worldfile}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 90 tests |
+| Rust kernel (hand-written) | `kernel/{lib,args,boot,net,player,tiles,worlddata,worldfile}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 104 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 

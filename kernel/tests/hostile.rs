@@ -24,7 +24,7 @@ fn start(password: Option<String>) -> SocketAddr {
     let port = l.local_addr().unwrap().port();
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     thread::spawn(move || {
-        let _ = serve(l, password);
+        let _ = serve(l, password, None);
     });
     addr
 }

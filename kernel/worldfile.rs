@@ -18,13 +18,11 @@
 //! world header starts, so a container parse can be checked EXACTLY rather than
 //! approximately - see the test that asserts the stream lands on it.
 //!
-//! Header, from `WorldFile.cs:1957` `LoadHeader` and `:1998` `LoadWorldFlags`. This
-//! slice stops after `rockLayer` and says so; the flags tail (banners, the downed-boss
-//! table, the ore tiers, the backgrounds) and every section after the header (tiles,
-//! chests, signs, NPCs, tile entities, pressure plates, town manager, bestiary,
-//! creative powers) are the next slices.
-
-use std::io::Read;
+//! Header, from `WorldFile.cs:1957` `LoadHeader` and `:1998` `LoadWorldFlags`. Both are
+//! read: `read_header` stops after `rockLayer`, which is where the container's pointer
+//! check needs it to, and `read_flags` walks the rest of the same record. Every section
+//! after the header (tiles, chests, signs, NPCs, tile entities, pressure plates, town
+//! manager, bestiary, creative powers) is the next slice.
 
 /// `FileMetadata.cs:66`: `(num & 0x00FFFFFFFFFFFFFF) == 27981915666277746`.
 ///
@@ -912,6 +910,21 @@ impl LoadedWorld {
     /// The sections this port does not decode yet, by name.
     pub fn undecoded(&self) -> Vec<&'static str> {
         self.sections.iter().filter(|s| !s.decoded).map(|s| s.name).collect()
+    }
+
+    /// The raw bytes of the tile section: `positions[1]` to `positions[2]`.
+    ///
+    /// `load_world` counts the tiles and throws them away, because reporting a world
+    /// should not cost 600 MB. A server that is going to SEND the tiles has to keep them,
+    /// and this is how it gets at the bytes to decode them from - the same span
+    /// `load_world` already checked ends exactly on `positions[2]`.
+    pub fn tile_section<'a>(&self, data: &'a [u8]) -> Option<&'a [u8]> {
+        let start = *self.container.positions.get(1)?;
+        let end = *self.container.positions.get(2)?;
+        if start < 0 || end < start || end as usize > data.len() {
+            return None;
+        }
+        Some(&data[start as usize..end as usize])
     }
 }
 

@@ -172,15 +172,15 @@ pub fn run(argv: &[String]) -> i32 {
     }
     println!();
 
-    // The entry path is implemented now (`kernel/net.rs`), so this serves instead of
-    // reporting. What is implemented is everything up to and including the handshake;
-    // what is not is everything after it, and the module says which message is missing
-    // on every kick rather than leaving a client to wait for one that will not come.
-    println!("serving: the entry path is implemented (accept, framing, Hello handshake).");
-    println!("  after the handshake this build has nothing: a client that asks for the world");
-    println!("  is kicked by name rather than left hanging (kernel/net.rs).");
-    println!("  A world FILE can be read (kernel/worldfile.rs, kernel/tiles.rs), but nothing");
-    println!("  sends one yet - so 'world loading' means reading a .wld here, not serving it.");
+    // The entry path is implemented (`kernel/net.rs`), and so is the OPENING OF THE WORLD
+    // TRANSFER. What is not is everything the C# sends after the tile sections - the
+    // world's items, NPCs, projectiles, banners, creative powers and pylons - and the
+    // module names each one it does not send rather than leaving a client to guess.
+    println!("serving: the entry path (accept, framing, Hello handshake) and the opening of");
+    println!("  the world transfer (WorldData 7, StatusTextSize 9, tile sections 10,");
+    println!("  PlayerSpawn 12). A client that connects gets terrain, and it does NOT get");
+    println!("  the world's items, NPCs, projectiles, banners, creative powers or pylons.");
+    println!("  A message with no handler is answered with a kick naming it (kernel/net.rs).");
     println!();
 
     // `LaunchInitializer.LoadSharedParameters` reads the port from
@@ -220,10 +220,40 @@ pub fn run(argv: &[String]) -> i32 {
     // world and the server loads it. This port can read one, so it does, and reports what
     // it found - INCLUDING the sections of the file it does not decode yet, because
     // "loaded your world" would otherwise be a half-truth.
+    //
+    // The tiles are ALSO decoded and kept here, because `RequestTileData` has to send
+    // them. That is the one place this port spends the memory the native server spends:
+    // `Main.tile` is a 20-million-entry array in the C# too. The cost is printed rather
+    // than hidden, so an operator running a large world can see what it costs before the
+    // process is killed for it.
+    let mut served: Option<std::sync::Arc<crate::net::ServedWorld>> = None;
     if let Some(path) = params.get("-world") {
         match std::fs::read(path) {
             Ok(data) => match crate::worldfile::load_world(&data) {
-                Ok(world) => report_world(path, &world),
+                Ok(world) => {
+                    report_world(path, &world);
+                    match load_tiles(&data, &world) {
+                        Ok(tiles) => {
+                            let bytes = tiles.len() * std::mem::size_of::<crate::tiles::Tile>();
+                            println!(
+                                "  tiles in memory      {} ({:.1} MiB, {} bytes each)",
+                                tiles.len(),
+                                bytes as f64 / (1024.0 * 1024.0),
+                                std::mem::size_of::<crate::tiles::Tile>()
+                            );
+                            let count = world.container.importance.len();
+                            served = Some(std::sync::Arc::new(crate::net::ServedWorld {
+                                allows_batching: crate::net::allows_save_compression_batching(count),
+                                world,
+                                tiles,
+                            }));
+                        }
+                        Err(e) => {
+                            eprintln!("-world {path:?}: the tiles could not be decoded: {e:?}");
+                            return 1;
+                        }
+                    }
+                }
                 Err(e) => {
                     eprintln!("-world {path:?} is not a world this port can read: {e:?}");
                     return 1;
@@ -252,13 +282,39 @@ pub fn run(argv: &[String]) -> i32 {
         .map(|a| a.to_string())
         .unwrap_or_else(|_| format!("0.0.0.0:{listen_port}"));
     println!("listening on {bound}");
-    match crate::net::serve(listener, password) {
+    match crate::net::serve(listener, password, served) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("server loop stopped: {e}");
             1
         }
     }
+}
+
+/// Decode every tile of a world, for serving.
+///
+/// The two runtime tables `tiles::decode_all_tiles` takes are supplied permissively, and
+/// the same argument as `load_world`'s applies: neither can move the cursor, so the decode
+/// is exact either way. What it does mean is that a slope the game would have dropped is
+/// kept and then sent, so a client may see a shape on a tile the native server would have
+/// left flat. That is a real divergence, it comes from `TileID.Sets.SaveSlopes` being
+/// assigned at runtime rather than written in the book, and it is said here rather than
+/// left for someone to find in a screenshot.
+fn load_tiles(
+    data: &[u8],
+    world: &crate::worldfile::LoadedWorld,
+) -> Result<Vec<crate::tiles::Tile>, crate::tiles::TileError> {
+    let section = world.tile_section(data).unwrap_or(&[]);
+    let save_slopes = vec![true; 0x10000];
+    let (tiles, _) = crate::tiles::decode_all_tiles(
+        section,
+        world.header.max_tiles_x,
+        world.header.max_tiles_y,
+        &world.container.importance,
+        &save_slopes,
+        u16::MAX,
+    )?;
+    Ok(tiles)
 }
 
 /// Report a world, and say which of its sections are not read yet.
