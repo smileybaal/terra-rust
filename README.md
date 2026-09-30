@@ -98,7 +98,7 @@ cargo run -p sheetty-cli -- pack v_server_types --rows 1..900   # ad-hoc row win
 
 cargo build -p terraria-server             # the Rust server: generated shape + hand-written kernel
 cargo run -p terraria-server -- -savedirectory C:\saves
-cargo test -p terraria-kernel              # 86 tests over the port, the kernel and the net entry path
+cargo test -p terraria-kernel              # 90 tests over the port, the kernel and the net entry path
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 
 python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
@@ -162,7 +162,7 @@ whole 125 MB assembly regardless of `-t`).
 | server evidence (ILSpy) | 2,463 types, 30,040 members, 14,486 methods, 3,601 edges |
 | client vs server | 2,458 shared, 6 client-only, 5 server-only, 2 divergent |
 | Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders; 126,315 lines across 5 emitted modules |
-| Rust kernel (hand-written) | `kernel/{lib,args,boot,net,player,tiles,worldfile}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 86 tests |
+| Rust kernel (hand-written) | `kernel/{lib,args,boot,net,player,tiles,worldfile}.rs` plus `kernel/tests/hostile.rs`, all listed in `kernel.tsv`; 90 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 

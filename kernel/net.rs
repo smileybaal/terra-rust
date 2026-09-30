@@ -307,6 +307,10 @@ pub fn serve(listener: TcpListener, password: Option<String>) -> io::Result<()> 
 /// invented, because they are what stops a client skipping the handshake.
 fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()> {
     let mut state: i32 = 0;
+    // The name from `SyncPlayer` (4). The C# stores it on the client's slot
+    // (`Netplay.Clients[whoAmI].Name`) and uses it for the duplicate-name check; there is
+    // no client table here yet, so it is held for this connection and logged.
+    let mut name: Option<String> = None;
     loop {
         let (id, body) = match read_packet(&mut stream) {
             Ok(p) => p,
@@ -349,6 +353,72 @@ fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()
                     send_password_request(&mut stream)?;
                 }
             }
+            continue;
+        }
+
+        // `MessageBuffer.cs:284-400`: `SyncPlayer` (4), the first thing a client sends
+        // after `PlayerInfo`. The reader does the sanitising, and its refusals carry the
+        // book's own keys, so a kick names the row the C# names.
+        if id == port::terraria::id::MessageID::SyncPlayer {
+            match crate::player::read_sync_player(&body) {
+                Ok(p) => {
+                    // The slot on the wire is DISCARDED, as the C# discards it
+                    // (`if (Main.netMode == 2) num188 = whoAmI;`): a client does not get to
+                    // say which player it is. There is one connection per client here, so
+                    // the connection's own identity is the only one it can have.
+                    println!(
+                        "sync player: {:?} (slot {} on the wire, ignored - one connection per client)",
+                        p.name, p.slot
+                    );
+                    name = Some(p.name);
+                }
+                Err(e) => {
+                    return match e.key() {
+                        Some(key) => boot(&mut stream, key, "SyncPlayer was refused"),
+                        // `TooShort` has no key: the C# has no message for a body that ends
+                        // early, so it is this port's own notice rather than a fake key.
+                        None => not_implemented(&mut stream, id),
+                    };
+                }
+            }
+            continue;
+        }
+
+        // `MessageBuffer.cs:1095`: `PlayerLifeMana` (16), the second thing the client
+        // sends. The rules are the ones `player::sanitise_life` already reproduces.
+        if id == port::terraria::id::MessageID::PlayerLifeMana {
+            let mut r = Cursor::new(&body[..]);
+            let mut two = [0u8; 2];
+            if r.read_exact(&mut two).is_ok() {
+                let life = i16::from_le_bytes(two);
+                if r.read_exact(&mut two).is_ok() {
+                    let max = i16::from_le_bytes(two);
+                    let lm = crate::player::sanitise_life(life, max);
+                    println!(
+                        "player life: {} of {} (dead: {})",
+                        lm.stat_life, lm.stat_life_max, lm.dead
+                    );
+                    continue;
+                }
+            }
+            return not_implemented(&mut stream, id);
+        }
+
+        // The password path is NOT written: the C# compares the string against
+        // `Netplay.ServerPassword` here (`MessageBuffer.cs:2218`). Accepting it without
+        // that comparison would let anyone in, so it is refused by name instead. This is
+        // deliberately checked BEFORE the early-burst acceptance below, because
+        // `SendPassword` (38) is itself in that list.
+        if id == port::terraria::id::MessageID::SendPassword {
+            return not_implemented(&mut stream, id);
+        }
+
+        // The rest of the client's opening burst (`MessageBuffer.cs:248-253`): ids the C#
+        // handles and this port does not yet. They are ACCEPTED so the conversation
+        // continues to the message that actually blocks the load, and the log says they
+        // were not applied - accepting them silently would look like they worked.
+        if EARLY_ALLOWED.contains(&id) {
+            println!("accepted message {id} (early player data; not applied yet)");
             continue;
         }
 
@@ -585,5 +655,107 @@ mod tests {
 
     fn read_mode_of(body: &[u8]) -> u8 {
         body[0]
+    }
+
+    /// The exact `SyncPlayer` (4) body this port's writer produces, so a test never
+    /// rejects a message for being malformed when it means to test something else.
+    fn sync_player_body(name: &str) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(&[0, 11, 2]);
+        b.extend_from_slice(&0.5f32.to_le_bytes());
+        b.push(3);
+        write_string(&mut b, name).unwrap();
+        b.push(0); // hairDye is ONE byte, not a string
+        b.extend_from_slice(&0u16.to_le_bytes());
+        b.push(0); // hideMisc
+        for _ in 0..7 {
+            b.extend_from_slice(&[1, 2, 3]);
+        }
+        b.extend_from_slice(&[0, 0, 0]); // difficulty, biome torches, crystals
+        b
+    }
+
+    /// `SyncPlayer` (4) is ACCEPTED, and the proof is that the next message is the one
+    /// that gets refused. A test that only checked "no kick arrived" would pass even if
+    /// the server had simply stopped reading.
+    #[test]
+    fn sync_player_is_accepted_and_the_next_message_is_the_one_refused() {
+        let addr = start(None);
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        send_hello(&mut c, CONNECT_STRING);
+        let (id, _) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::PlayerInfo);
+
+        write_packet(&mut c, port::terraria::id::MessageID::SyncPlayer, &sync_player_body("Probe")).unwrap();
+        // Then ask for the world, which IS unimplemented. If message 4 had been refused
+        // the connection would already be gone and this read would fail.
+        write_packet(&mut c, port::terraria::id::MessageID::RequestWorldData, &[]).unwrap();
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::Kick);
+        let text = read_string(&mut Crsr::new(&body[1..])).unwrap();
+        assert!(
+            text.contains("message 6"),
+            "the refusal must be for message 6, not 4: {text:?}"
+        );
+    }
+
+    /// The client's whole opening burst is accepted, so the conversation reaches the
+    /// message that actually blocks the load.
+    #[test]
+    fn the_early_burst_is_accepted_in_the_clients_order() {
+        let addr = start(None);
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        send_hello(&mut c, CONNECT_STRING);
+        let _ = read_packet(&mut c).unwrap();
+
+        write_packet(&mut c, port::terraria::id::MessageID::SyncPlayer, &sync_player_body("Burst")).unwrap();
+        for id in [68u8, 42, 50, 147] {
+            write_packet(&mut c, id, &[0]).unwrap();
+        }
+        // Life and mana, the one the port already sanitises.
+        write_packet(&mut c, port::terraria::id::MessageID::PlayerLifeMana, &[100, 0, 100, 0]).unwrap();
+        // None of that may have produced a reply; the world request is what does.
+        write_packet(&mut c, port::terraria::id::MessageID::RequestWorldData, &[]).unwrap();
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::Kick);
+        let text = read_string(&mut Crsr::new(&body[1..])).unwrap();
+        assert!(text.contains("message 6"), "got {text:?}");
+    }
+
+    /// A name the book refuses is refused with the book's OWN key, not a literal.
+    #[test]
+    fn a_too_long_name_is_refused_with_the_books_key() {
+        let addr = start(None);
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        send_hello(&mut c, CONNECT_STRING);
+        let _ = read_packet(&mut c).unwrap();
+
+        let long = "x".repeat(crate::player::NAME_LEN + 1);
+        write_packet(&mut c, port::terraria::id::MessageID::SyncPlayer, &sync_player_body(&long)).unwrap();
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::Kick);
+        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), "Net.NameTooLong");
+    }
+
+    /// The password path is NOT written, and this is the test that keeps it that way:
+    /// `SendPassword` is in the early-burst list, so without the explicit check above it
+    /// would be accepted without ever being compared, which would let anyone in.
+    #[test]
+    fn send_password_is_not_silently_accepted() {
+        let addr = start(Some("hunter2".to_string()));
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        send_hello(&mut c, CONNECT_STRING);
+        let (id, _) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::RequestPassword);
+
+        let mut body = Vec::new();
+        write_string(&mut body, "hunter2").unwrap();
+        write_packet(&mut c, port::terraria::id::MessageID::SendPassword, &body).unwrap();
+        let (id, _) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::Kick, "a password must not be accepted unchecked");
     }
 }
