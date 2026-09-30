@@ -7,7 +7,24 @@
 /re/ghidra_projects/
 /re/traces/*.tsv
 /re/ctx/*.tsv
-/re/binaries/*.exe
+# A copy of a game file is never committed, whatever it is called. re/binaries is
+# a CHECKSUMMED working copy (see tools/verify-binaries.py): the .sha256 files are
+# the artifact, the binaries beside them are not. Everything else in there is
+# ignored, so a stray .xnb or .dll cannot slip in behind the .exe rule.
+/re/binaries/*
+!/re/binaries/*.sha256
+
+# The install's own shapes. These never have a reason to appear here: the evidence
+# sheet records Content paths and hashes, it does not carry the bytes.
+/Content/
+*.xnb
+*.dll
+*.pdb
+*.wav
+*.ogg
+*.mp3
+*.xwb
+*.xsb
 
 # xlsx is a view, never the store (D7)
 **/*.xlsx
