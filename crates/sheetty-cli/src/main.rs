@@ -480,9 +480,6 @@ fn cmd_schema(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-#[allow(dead_code)]
-fn _unused(_p: &Path) {}
-
 /// Count files present in `a` or `b` whose bytes differ. Missing files count as
 /// a difference, which is what makes this a real determinism check rather than a
 /// comparison of two runs that both happened to write nothing.
