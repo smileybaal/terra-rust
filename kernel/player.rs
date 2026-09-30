@@ -427,6 +427,26 @@ pub enum SyncPlayerError {
     EmptyName,
 }
 
+impl SyncPlayerError {
+    /// The `Net.*` key the C# kicks with, or `None` when the C# has no text for it.
+    ///
+    /// Read from the book - the rows are `net.nametoolong` and `net.emptyname` - so a
+    /// caller cannot kick with a key that does not exist. `TooShort` has no key because
+    /// the C# has no message for it: a body that ends early is a framing failure, not a
+    /// client to be explained to.
+    pub fn key(self) -> Option<&'static str> {
+        match self {
+            SyncPlayerError::TooShort => None,
+            SyncPlayerError::NameTooLong => {
+                crate::sheets::localization::by_id("net.nametoolong").map(|d| d.key)
+            }
+            SyncPlayerError::EmptyName => {
+                crate::sheets::localization::by_id("net.emptyname").map(|d| d.key)
+            }
+        }
+    }
+}
+
 /// A `SyncPlayer` (4) body after the server has sanitised it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncPlayerRead {
@@ -946,6 +966,20 @@ mod tests {
         assert_eq!(read_sync_player(&[]), Err(SyncPlayerError::TooShort));
         assert_eq!(read_sync_player(&golden()[..10]), Err(SyncPlayerError::TooShort));
         assert_eq!(read_sync_player(&golden()[..39]), Err(SyncPlayerError::TooShort));
+    }
+
+    /// The refusal keys come from the book, so a kick cannot name a row that is not
+    /// there, and the framing failure deliberately has no key.
+    #[test]
+    fn the_refusal_keys_are_rows() {
+        assert_eq!(SyncPlayerError::NameTooLong.key(), Some("Net.NameTooLong"));
+        assert_eq!(SyncPlayerError::EmptyName.key(), Some("Net.EmptyName"));
+        assert_eq!(SyncPlayerError::TooShort.key(), None);
+        // The key is a lookup, so the text it names is one too.
+        assert_eq!(
+            crate::sheets::localization::by_id("net.nametoolong").unwrap().text,
+            "Name is too long."
+        );
     }
 
     /// Journey is bit 3, not bit 2, and Normal sets nothing.

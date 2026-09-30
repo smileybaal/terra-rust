@@ -96,9 +96,10 @@ mod tests {
     /// lookupable key. This is the chain the port now depends on: the game's JSON
     /// -> sheet row -> generated `Def` -> the string the server prints.
     #[test]
-    fn the_localization_relation_carries_the_cli_section() {
+    fn the_localization_relation_carries_the_protocol_strings() {
         use sheets::localization::{by_id, COUNT};
-        assert_eq!(COUNT, 108);
+        // CLI 108 + Net 27 + LegacyMultiplayer 27, from two artifacts.
+        assert_eq!(COUNT, 162);
         let prompt = by_id("cli.chooseworld").expect("the world-select prompt is a row");
         assert_eq!(prompt.key, "CLI.ChooseWorld");
         assert_eq!(prompt.text, "Choose World: ");
@@ -108,6 +109,13 @@ mod tests {
         assert_eq!(by_id("cli.serverisfull").unwrap().key, "CLI.ServerIsFull");
         assert_eq!(by_id("cli.serverisfull").unwrap().text,
                    "This server is full right now, please try again later.");
+        // The Lang.mp table, which is 1-BASED and comes from the Legacy artifact.
+        assert_eq!(by_id("legacymultiplayer.1").unwrap().text, "Incorrect password");
+        assert_eq!(by_id("legacymultiplayer.4").unwrap().text,
+                   "You are not using the same version as this server.");
+        // The Net.* status texts the reader's refusals name.
+        assert_eq!(by_id("net.nametoolong").unwrap().text, "Name is too long.");
+        assert_eq!(by_id("net.emptyname").unwrap().text, "Empty name.");
         // `length` is the UTF-8 byte length, so a multi-byte string would disagree
         // with `.len()` and this is where that would surface.
         for d in sheets::localization::ALL {

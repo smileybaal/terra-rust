@@ -34,13 +34,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ARTIFACT = "ilspy_server/Terraria.Localization.Content.en-US.json"
-SOURCE = ROOT / "re" / "exports" / ARTIFACT
 OUT = ROOT / "sheets" / "re" / "server" / "localization.tsv"
 
-# The section this run carries. The rest are counted and reported as dropped so the
-# sheet never looks complete when it is not.
-SECTION = "CLI"
+# The sections this producer carries, per artifact. This is the protocol surface the
+# port needs: the CLI console and its prompts, the `Net.*` status and kick texts, and
+# the `LegacyMultiplayer` table that `Lang.mp[n]` indexes (`mp[1]` is "Incorrect
+# password", `mp[4]` is the version mismatch). Everything else in these files is
+# counted in `dropped`, so the sheet cannot look complete while it is not.
+SOURCES = [
+    ("ilspy_server/Terraria.Localization.Content.en-US.json", ("CLI", "Net")),
+    ("ilspy_server/Terraria.Localization.Content.en-US.Legacy.json", ("LegacyMultiplayer",)),
+]
 
 COLUMNS = [
     ("id", "string*"),
@@ -85,23 +89,27 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="report only, write nothing")
     args = ap.parse_args()
 
-    if not SOURCE.exists():
-        print(f"missing artifact: {SOURCE}", file=sys.stderr)
-        return 2
-
-    leaves = list(walk(load_json(SOURCE)))
+    leaves = []
+    for rel, _sections in SOURCES:
+        path = ROOT / "re" / "exports" / rel
+        if not path.exists():
+            print(f"missing artifact: {path}", file=sys.stderr)
+            return 2
+        for key, pointer, text in walk(load_json(path)):
+            leaves.append((rel, key, pointer, text))
     source_rows = len(leaves)
 
+    wanted = {rel: set(sections) for rel, sections in SOURCES}
     kept, dropped = [], 0
-    for key, pointer, text in leaves:
+    for rel, key, pointer, text in leaves:
         section = key.split(".")[0]
-        if section != SECTION:
+        if section not in wanted[rel]:
             continue
         # dec008: the canonical TSV form forbids unescaped tabs and newlines.
         if "\t" in text or "\n" in text or "\r" in text:
             dropped += 1
             continue
-        kept.append((key.lower(), key, section, text, pointer))
+        kept.append((key.lower(), key, section, text, pointer, rel))
 
     kept.sort()
     ids = [r[0] for r in kept]
@@ -134,7 +142,7 @@ def main() -> int:
         "# another section without restructuring the sheet.",
         "# `length` is the UTF-8 byte length of `text`.",
         "# `ref_addr` is the JSON pointer of the leaf inside the artifact.",
-        f"# Only the {SECTION} section is carried so far; the rest are counted in",
+        f"# Only {', '.join(sorted({s for _, secs in SOURCES for s in secs}))} are carried so far; the rest are counted in",
         "# `dropped` below, so the sheet cannot look complete while it is not.",
         "# Keys are dotted paths, so the compound-key exception is declared (dec009).",
         "# id_form: compound",
@@ -145,7 +153,7 @@ def main() -> int:
 
     header = "\t".join(f"{n}:{t}" for n, t in COLUMNS)
     lines = [*manifest, header]
-    for ident, key, section, text, pointer in kept:
+    for ident, key, section, text, pointer, rel in kept:
         cells = [
             ident,
             key,
@@ -153,7 +161,7 @@ def main() -> int:
             text,
             str(len(text.encode("utf-8"))),
             "identified",
-            ARTIFACT,
+            rel,
             pointer,
             "certain",
             "localization table leaf",

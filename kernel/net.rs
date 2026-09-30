@@ -57,12 +57,35 @@ pub const CONNECT_STRING: &str = "Terraria326";
 /// from the localization table the game ships, and which key belongs where is cited
 /// from the C# line that passes it.
 mod mp {
-    /// `Lang.mp[1]`, passed at MessageBuffer.cs:160: "Incorrect password".
-    pub const INCORRECT_PASSWORD: &str = "LegacyMultiplayer.1";
-    /// `Lang.mp[2]`, passed at MessageBuffer.cs:167 and :171.
-    pub const INVALID_STATE: &str = "LegacyMultiplayer.2";
-    /// `Lang.mp[4]`, passed at MessageBuffer.cs:218.
-    pub const VERSION_MISMATCH: &str = "LegacyMultiplayer.4";
+    /// `Lang.mp[n]`, the table the C# indexes for its multiplayer kick texts
+    /// (`MessageBuffer.cs:160` passes `mp[1]`, `:167` and `:171` pass `mp[2]`, `:218`
+    /// passes `mp[4]`).
+    ///
+    /// These were three hand-typed strings until the localization sheet grew the
+    /// `LegacyMultiplayer` section; now they are rows, and a wrong index is a preflight
+    /// problem rather than a typo nobody can see. `Lang.mp` is 1-BASED, which is why the
+    /// ids start at `legacymultiplayer.1`.
+    fn row(index: u32) -> &'static str {
+        let id = format!("legacymultiplayer.{index}");
+        crate::sheets::localization::by_id(&id)
+            .unwrap_or_else(|| panic!("{id} is a row of re/server/localization"))
+            .key
+    }
+
+    /// "Incorrect password".
+    pub fn incorrect_password() -> &'static str {
+        row(1)
+    }
+
+    /// "Invalid operation at this state."
+    pub fn invalid_state() -> &'static str {
+        row(2)
+    }
+
+    /// "You are not using the same version as this server."
+    pub fn version_mismatch() -> &'static str {
+        row(4)
+    }
 }
 
 /// `Netplay.cs:233`: the key the C# sends when there is no free client slot.
@@ -296,16 +319,16 @@ fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()
         // with the "Incorrect password" kick. Without it a client could sit at State -1
         // and be told nothing, and a repeated Hello would be ignored rather than refused.
         if state == -1 && id != port::terraria::id::MessageID::SendPassword {
-            return boot(&mut stream, mp::INCORRECT_PASSWORD, "not SendPassword while State == -1");
+            return boot(&mut stream, mp::incorrect_password(), "not SendPassword while State == -1");
         }
 
         // MessageBuffer.cs:169: before the handshake, only Hello is legal.
         if state == 0 && id != port::terraria::id::MessageID::Hello {
-            return boot(&mut stream, mp::INVALID_STATE, "not Hello while State == 0");
+            return boot(&mut stream, mp::invalid_state(), "not Hello while State == 0");
         }
         // MessageBuffer.cs:165: ids above 12 are refused until the client is settled.
         if state < 10 && id > 12 && !EARLY_ALLOWED.contains(&id) {
-            return boot(&mut stream, mp::INVALID_STATE, "id above 12 before State >= 10");
+            return boot(&mut stream, mp::invalid_state(), "id above 12 before State >= 10");
         }
 
         if id == port::terraria::id::MessageID::Hello {
@@ -314,7 +337,7 @@ fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()
             }
             let greeting = read_string(&mut Cursor::new(&body[..]))?;
             if greeting != CONNECT_STRING {
-                return boot(&mut stream, mp::VERSION_MISMATCH, "wrong greeting");
+                return boot(&mut stream, mp::version_mismatch(), "wrong greeting");
             }
             match &password {
                 None => {
@@ -472,7 +495,7 @@ mod tests {
         send_hello(&mut c, "Terraria999");
         let (id, body) = read_packet(&mut c).unwrap();
         assert_eq!(id, port::terraria::id::MessageID::Kick);
-        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::VERSION_MISMATCH);
+        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::version_mismatch());
     }
 
     /// MessageBuffer.cs:169 again, from the outside: a client that asks for world data
@@ -484,7 +507,7 @@ mod tests {
         write_packet(&mut c, port::terraria::id::MessageID::RequestWorldData, &[]).unwrap();
         let (id, body) = read_packet(&mut c).unwrap();
         assert_eq!(id, port::terraria::id::MessageID::Kick);
-        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::INVALID_STATE);
+        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::invalid_state());
     }
 
     /// Past the handshake the port has nothing, and says so with a literal rather than
@@ -520,7 +543,7 @@ mod tests {
         send_hello(&mut c, CONNECT_STRING);
         let (id, body) = read_packet(&mut c).unwrap();
         assert_eq!(id, port::terraria::id::MessageID::Kick);
-        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::INCORRECT_PASSWORD);
+        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::incorrect_password());
     }
 
     // -- helpers ------------------------------------------------------------

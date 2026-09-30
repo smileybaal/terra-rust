@@ -17,13 +17,13 @@
 # another section without restructuring the sheet.
 # `length` is the UTF-8 byte length of `text`.
 # `ref_addr` is the JSON pointer of the leaf inside the artifact.
-# Only the CLI section is carried so far; the rest are counted in
+# Only CLI, LegacyMultiplayer, Net are carried so far; the rest are counted in
 # `dropped` below, so the sheet cannot look complete while it is not.
 # Keys are dotted paths, so the compound-key exception is declared (dec009).
 # id_form: compound
-# source_rows: 3699
-# dropped: 3591
-# dropped_reason: 0 leaf/leaves contain a TAB or newline and cannot be represented (dec008); 3591 belong to sections this run does not carry
+# source_rows: 4915
+# dropped: 4753
+# dropped_reason: 0 leaf/leaves contain a TAB or newline and cannot be represented (dec008); 4753 belong to sections this run does not carry
 id:string*	key:string	section:string	text:string	length:u16	status:string	artifact:string	ref_addr:string	ref_conf:string	evidence:string
 cli.automaticportforward	CLI.AutomaticPortForward	CLI	Automatically forward port? (y/n): 	35	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/AutomaticPortForward	certain	localization table leaf
 cli.availablecommands	CLI.AvailableCommands	CLI	Available commands:	19	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/AvailableCommands	certain	localization table leaf
@@ -133,3 +133,57 @@ cli.version_description	CLI.Version_Description	CLI	Print version number.	21	ide
 cli.waterisalreadysettling	CLI.WaterIsAlreadySettling	CLI	Water is already settling	25	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/WaterIsAlreadySettling	certain	localization table leaf
 cli.worldnamelengthtoolong	CLI.WorldNameLengthTooLong	CLI	The world name entered is too long! (Max characters: {0})	57	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/WorldNameLengthTooLong	certain	localization table leaf
 cli.yes	CLI.Yes	CLI	yes	3	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/CLI/Yes	certain	localization table leaf
+legacymultiplayer.0	LegacyMultiplayer.0	LegacyMultiplayer	Receive:	8	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/0	certain	localization table leaf
+legacymultiplayer.1	LegacyMultiplayer.1	LegacyMultiplayer	Incorrect password	18	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/1	certain	localization table leaf
+legacymultiplayer.10	LegacyMultiplayer.10	LegacyMultiplayer	You are not in a team!	22	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/10	certain	localization table leaf
+legacymultiplayer.11	LegacyMultiplayer.11	LegacyMultiplayer	{0} has enabled PvP!	20	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/11	certain	localization table leaf
+legacymultiplayer.12	LegacyMultiplayer.12	LegacyMultiplayer	{0} has disabled PvP!	21	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/12	certain	localization table leaf
+legacymultiplayer.13	LegacyMultiplayer.13	LegacyMultiplayer	{0} is no longer on a team.	27	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/13	certain	localization table leaf
+legacymultiplayer.14	LegacyMultiplayer.14	LegacyMultiplayer	{0} has joined the red team.	28	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/14	certain	localization table leaf
+legacymultiplayer.15	LegacyMultiplayer.15	LegacyMultiplayer	{0} has joined the green team.	30	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/15	certain	localization table leaf
+legacymultiplayer.16	LegacyMultiplayer.16	LegacyMultiplayer	{0} has joined the blue team.	29	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/16	certain	localization table leaf
+legacymultiplayer.17	LegacyMultiplayer.17	LegacyMultiplayer	{0} has joined the yellow team.	31	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/17	certain	localization table leaf
+legacymultiplayer.18	LegacyMultiplayer.18	LegacyMultiplayer	Welcome to	10	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/18	certain	localization table leaf
+legacymultiplayer.19	LegacyMultiplayer.19	LegacyMultiplayer	{0} has joined.	15	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/19	certain	localization table leaf
+legacymultiplayer.2	LegacyMultiplayer.2	LegacyMultiplayer	Invalid operation at this state.	32	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/2	certain	localization table leaf
+legacymultiplayer.20	LegacyMultiplayer.20	LegacyMultiplayer	{0} has left.	13	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/20	certain	localization table leaf
+legacymultiplayer.21	LegacyMultiplayer.21	LegacyMultiplayer	/players	8	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/21	certain	localization table leaf
+legacymultiplayer.22	LegacyMultiplayer.22	LegacyMultiplayer	{0} has joined the pink team.	29	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/22	certain	localization table leaf
+legacymultiplayer.23	LegacyMultiplayer.23	LegacyMultiplayer	*{0} was slain {1} times.	25	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/23	certain	localization table leaf
+legacymultiplayer.24	LegacyMultiplayer.24	LegacyMultiplayer	*{0} was slain by other players {1} times.	42	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/24	certain	localization table leaf
+legacymultiplayer.25	LegacyMultiplayer.25	LegacyMultiplayer	*{0} was slain {1} time.	24	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/25	certain	localization table leaf
+legacymultiplayer.26	LegacyMultiplayer.26	LegacyMultiplayer	*{0} was slain by other players {1} time.	41	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/26	certain	localization table leaf
+legacymultiplayer.3	LegacyMultiplayer.3	LegacyMultiplayer	You are banned from this server.	32	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/3	certain	localization table leaf
+legacymultiplayer.4	LegacyMultiplayer.4	LegacyMultiplayer	You are not using the same version as this server.	50	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/4	certain	localization table leaf
+legacymultiplayer.5	LegacyMultiplayer.5	LegacyMultiplayer	{0} is already on this server.	30	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/5	certain	localization table leaf
+legacymultiplayer.6	LegacyMultiplayer.6	LegacyMultiplayer	/playing	8	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/6	certain	localization table leaf
+legacymultiplayer.7	LegacyMultiplayer.7	LegacyMultiplayer	Current players:	16	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/7	certain	localization table leaf
+legacymultiplayer.8	LegacyMultiplayer.8	LegacyMultiplayer	/roll	5	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/8	certain	localization table leaf
+legacymultiplayer.9	LegacyMultiplayer.9	LegacyMultiplayer	rolls a	7	identified	ilspy_server/Terraria.Localization.Content.en-US.Legacy.json	/LegacyMultiplayer/9	certain	localization table leaf
+net.cannotteleporttopylonbecauseaccessinglihzahrdtempleearly	Net.CannotTeleportToPylonBecauseAccessingLihzahrdTempleEarly	Net	Ancient forces prevent you from accessing this location...	58	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CannotTeleportToPylonBecauseAccessingLihzahrdTempleEarly	certain	localization table leaf
+net.cannotteleporttopylonbecausenotenoughnpcs	Net.CannotTeleportToPylonBecauseNotEnoughNPCs	Net	There are not enough villagers living near that pylon to access it	66	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CannotTeleportToPylonBecauseNotEnoughNPCs	certain	localization table leaf
+net.cannotteleporttopylonbecausenotenoughnpcsatcurrentpylon	Net.CannotTeleportToPylonBecauseNotEnoughNPCsAtCurrentPylon	Net	There are not enough villagers living near the current pylon	60	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CannotTeleportToPylonBecauseNotEnoughNPCsAtCurrentPylon	certain	localization table leaf
+net.cannotteleporttopylonbecausenotmeetingbiomerequirements	Net.CannotTeleportToPylonBecauseNotMeetingBiomeRequirements	Net	This pylon is not in the correct biome to use	45	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CannotTeleportToPylonBecauseNotMeetingBiomeRequirements	certain	localization table leaf
+net.cannotteleporttopylonbecauseplayerisnotnearapylon	Net.CannotTeleportToPylonBecausePlayerIsNotNearAPylon	Net	You are not close enough to a pylon to teleport with the pylon network	70	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CannotTeleportToPylonBecausePlayerIsNotNearAPylon	certain	localization table leaf
+net.cannotteleporttopylonbecausethereisdanger	Net.CannotTeleportToPylonBecauseThereIsDanger	Net	Defeat the current threat before you can use the pylon network!	63	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CannotTeleportToPylonBecauseThereIsDanger	certain	localization table leaf
+net.cheatinginvalid	Net.CheatingInvalid	Net	Cheating attempt detected: Invalid kick-out	43	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CheatingInvalid	certain	localization table leaf
+net.cheatingliquidspam	Net.CheatingLiquidSpam	Net	Cheating attempt detected: Liquid spam	38	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CheatingLiquidSpam	certain	localization table leaf
+net.cheatingprojectilespam	Net.CheatingProjectileSpam	Net	Cheating attempt detected: Projectile spam	42	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CheatingProjectileSpam	certain	localization table leaf
+net.cheatingtileremovalspam	Net.CheatingTileRemovalSpam	Net	Cheating attempt detected: Remove tile spam	43	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CheatingTileRemovalSpam	certain	localization table leaf
+net.cheatingtilespam	Net.CheatingTileSpam	Net	Cheating attempt detected: Add tile spam	40	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/CheatingTileSpam	certain	localization table leaf
+net.clientconnecting	Net.ClientConnecting	Net	{0} is connecting...	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/ClientConnecting	certain	localization table leaf
+net.clientlostconnection	Net.ClientLostConnection	Net	{0} lost connection...	22	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/ClientLostConnection	certain	localization table leaf
+net.connectingto	Net.ConnectingTo	Net	Connecting to {0}	17	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/ConnectingTo	certain	localization table leaf
+net.emptyname	Net.EmptyName	Net	Empty name.	11	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/EmptyName	certain	localization table leaf
+net.foundserver	Net.FoundServer	Net	Found server	12	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/FoundServer	certain	localization table leaf
+net.lostconnection	Net.LostConnection	Net	Lost connection	15	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/LostConnection	certain	localization table leaf
+net.nametoolong	Net.NameTooLong	Net	Name is too long.	17	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/NameTooLong	certain	localization table leaf
+net.playeriscreativeandworldisnotcreative	Net.PlayerIsCreativeAndWorldIsNotCreative	Net	Only Non-Journey characters may enter a Non-Journey server.	59	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/PlayerIsCreativeAndWorldIsNotCreative	certain	localization table leaf
+net.playerisnotcreativeandworldiscreative	Net.PlayerIsNotCreativeAndWorldIsCreative	Net	Only Journey characters may enter a Journey server.	51	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/PlayerIsNotCreativeAndWorldIsCreative	certain	localization table leaf
+net.requestingtiledata	Net.RequestingTileData	Net	Requesting tile data	20	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/RequestingTileData	certain	localization table leaf
+net.requestingworldinformation	Net.RequestingWorldInformation	Net	Requesting world information	28	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/RequestingWorldInformation	certain	localization table leaf
+net.sendingplayerdata	Net.SendingPlayerData	Net	Sending player data...	22	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/SendingPlayerData	certain	localization table leaf
+net.serverautoshutdown	Net.ServerAutoShutdown	Net	Local player left. Autoshutdown starting.	41	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/ServerAutoShutdown	certain	localization table leaf
+net.serversavingonexit	Net.ServerSavingOnExit	Net	Saving before exit...	21	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/ServerSavingOnExit	certain	localization table leaf
+net.statuscomplete	Net.StatusComplete	Net	{0}: Complete!	14	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/StatusComplete	certain	localization table leaf
+net.steamhostonlyallowsfriends	Net.SteamHostOnlyAllowsFriends	Net	Only the host's steam friends may enter this server	51	identified	ilspy_server/Terraria.Localization.Content.en-US.json	/Net/SteamHostOnlyAllowsFriends	certain	localization table leaf
