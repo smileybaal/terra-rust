@@ -65,6 +65,8 @@ re_client_fields.name	re/client/fields	name	string	-	no	-	-	v_full	-
 re_client_fields.field_type	re/client/fields	field_type	string	-	no	-	-	v_full	-
 re_client_fields.kind	re/client/fields	kind	string	-	no	-	-	v_full	-
 re_client_fields.modifiers	re/client/fields	modifiers	string	-	no	-	-	v_full	-
+re_client_fields.value	re/client/fields	value	string	-	yes	-	-	v_full	-
+re_client_fields.ord	re/client/fields	ord	u16	-	no	-	-	v_full	-
 re_client_fields.status	re/client/fields	status	string	-	no	-	-	v_full	-
 re_client_fields.artifact	re/client/fields	artifact	string	-	no	-	-	v_full	-
 re_client_fields.ref_addr	re/client/fields	ref_addr	string	-	no	-	-	v_full	-
@@ -146,6 +148,8 @@ re_server_fields.name	re/server/fields	name	string	-	no	-	-	v_full	-
 re_server_fields.field_type	re/server/fields	field_type	string	-	no	-	-	v_full	-
 re_server_fields.kind	re/server/fields	kind	string	-	no	-	-	v_full	-
 re_server_fields.modifiers	re/server/fields	modifiers	string	-	no	-	-	v_full	-
+re_server_fields.value	re/server/fields	value	string	-	yes	-	-	v_full	-
+re_server_fields.ord	re/server/fields	ord	u16	-	no	-	-	v_full	-
 re_server_fields.status	re/server/fields	status	string	-	no	-	-	v_full	-
 re_server_fields.artifact	re/server/fields	artifact	string	-	no	-	-	v_full	-
 re_server_fields.ref_addr	re/server/fields	ref_addr	string	-	no	-	-	v_full	-

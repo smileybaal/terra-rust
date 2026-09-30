@@ -304,12 +304,17 @@ def split_decl(head: str) -> tuple[str, str, str]:
     return (" ".join(mods), " ".join(rest), name)
 
 
-def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str, str]]:
+def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str, str, str]]:
     """Classify one line that sits directly inside a type body.
 
-    Returns a list of (kind, modifiers, declared_type, name), empty when the line
-    is not a member declaration (a brace, an accessor, a stray statement). It is
-    a list because C# allows several declarators on one line: `int a, b;`.
+    Returns a list of (kind, modifiers, declared_type, name, value), empty when
+    the line is not a member declaration (a brace, an accessor, a statement). It
+    is a list because C# allows several declarators on one line: `int a, b;`.
+
+    `value` carries the constant's initializer, verbatim and only when it is a
+    simple literal. Without it the 14,880 constants in this binary - which are
+    most of `ItemID`, `TileID`, `NPCID` and friends - could be projected as
+    names with no data, which is not a port of anything.
 
     The order of the tests matters and was got wrong once: a field whose
     initializer spans lines (`static readonly char[] X = new char[64]` then a
@@ -329,7 +334,7 @@ def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str
     if type_kind == "enum":
         m = re.match(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*(?P<val>[^,]+?))?\s*,?$", s)
         if m:
-            return [("enum_member", "", m.group("val") or "", m.group("name"))]
+            return [("enum_member", "", "", m.group("name"), (m.group("val") or "").strip())]
         return []
 
     eq = find_top_level_eq(s)
@@ -343,6 +348,14 @@ def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str
         cut = eq
     if arrow >= 0:
         cut = min(cut, arrow)
+    # the ORIGINAL text, not the literal-blanked one, so a string constant keeps
+    # its real value instead of becoming `""`
+    real = line.strip()
+    real_eq = find_top_level_eq(strip_literals(real))
+    if real_eq >= 0:
+        real_init = real[real_eq + 1:].strip()
+    else:
+        real_init = ""
     head = s[:cut]
     brace_at = head.find("{")
     if brace_at >= 0:
@@ -383,14 +396,14 @@ def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str
                 mods.append(toks.pop(0))
             name = f"operator {opname.strip()}"
             if name and name != "operator":
-                return [("method", " ".join(mods), " ".join(toks), name)]
+                return [("method", " ".join(mods), " ".join(toks), name, "")]
             return []
         mods, ty, name = split_decl(pre)
-        return [("method", mods, ty, name)] if name else []
+        return [("method", mods, ty, name, "")] if name else []
 
     if arrow >= 0 and (eq < 0 or arrow < eq):
         mods, ty, name = split_decl(pre)
-        return [("property", mods, ty, name)] if name and ty else []
+        return [("property", mods, ty, name, "")] if name and ty else []
 
     # fields, with or without an initializer, and possibly several declarators
     body = s[:eq] if eq >= 0 else s.rstrip().rstrip(";")
@@ -401,11 +414,7 @@ def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str
         part = part.strip()
         if not part:
             continue
-        if i == 0:
-            mods, ty, name = first_mods, first_ty, split_decl(part)[2]
-        else:
-            # a later declarator carries only a name: `int a, b;`
-            mods, ty, name = first_mods, first_ty, split_decl(part)[2]
+        mods, ty, name = first_mods, first_ty, split_decl(part)[2]
         if not name or not ty:
             continue
         modwords = mods.split()
@@ -415,7 +424,19 @@ def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str
             kind = "event"
         else:
             kind = "field"
-        out.append((kind, mods, ty, name))
+        value = ""
+        if kind == "const" and i == 0:
+            # only a simple literal is a value we can project; `new char[64]` and
+            # friends are left empty rather than guessed at
+            v = real_init.rstrip(";").strip() if len(parts) == 1 else ""
+            if v and not any(c in v for c in "{()}") and len(v) <= 64:
+                # a string constant is stored WITHOUT its surrounding quotes: the
+                # canonical TSV form treats a quoted cell as a token/merge hazard
+                # (W-L1-QUOTED), and the column already says the type is `string`.
+                if len(v) >= 2 and v.startswith('"') and v.endswith('"'):
+                    v = v[1:-1]
+                value = v
+        out.append((kind, mods, ty, name, value))
 
     if out:
         return out
@@ -423,7 +444,7 @@ def member_kind_and_parts(line: str, type_kind: str) -> list[tuple[str, str, str
     # a block-bodied property: `public static IPAddress ServerIP` then `{`
     mods, ty, name = split_decl(pre)
     if name and ty:
-        return [("property", mods, ty, name)]
+        return [("property", mods, ty, name, "")]
     return []
 
 
@@ -712,7 +733,7 @@ class TypeReader:
                     if not found:
                         self.skipped_lines += 1
                     for got in found:
-                        mkind, mods, ty, name = got
+                        mkind, mods, ty, name, value = got
                         if mkind == "method":
                             sig = code.strip().split("{")[0].strip()
                             # a constructor is named after its type and carries no
@@ -721,7 +742,7 @@ class TypeReader:
                             t["methods"].append((name, sig, real, mods))
                             t["sigtext"].append(sig)
                         else:
-                            t["members"].append((mkind, mods, ty, name))
+                            t["members"].append((mkind, mods, ty, name, value))
             depth += brace_delta(ln)
             i += 1
         return end
@@ -812,7 +833,7 @@ def scan() -> tuple[list[list[str]], list[list[str]], list[list[str]], dict]:
             # construction rather than by coincidence (it was the disagreement
             # between them that exposed the nested-owner bug).
             # ---------------------------------------------------------------
-            for mkind, mods, ty, mname in t["members"]:
+            for mord, (mkind, mods, ty, mname, mvalue) in enumerate(t["members"]):
                 if mkind == "property":
                     stats["props"] += 1
                 elif mkind == "event":
@@ -827,8 +848,9 @@ def scan() -> tuple[list[list[str]], list[list[str]], list[list[str]], dict]:
                 if uniq_f:
                     fid = f"{fid}_{uniq_f}"
                 fields_rows.append([
-                    fid, tid, mname, ty or "-", mkind, mods or "-", "todo",
-                    artifact, f"ilspy:{artifact}", "certain", f"ilspycmd {artifact}",
+                    fid, tid, mname, ty or "-", mkind, mods or "-", mvalue or "-",
+                    str(mord), "todo", artifact, f"ilspy:{artifact}", "certain",
+                    f"ilspycmd {artifact}",
                 ])
 
             counts: dict[str, int] = {}
@@ -987,7 +1009,18 @@ def emit_target(t: dict) -> int:
             "# `type` is this id, so the two agree by construction (dec018).\n"
             "# Type ids are dotted namespace paths, so the compound-key exception is declared.\n"
             "# emit: rust\n"
-            "# id_form: compound\n"
+            + (
+                "# emit_port: rust\n"
+                f"# port_from: {fields_name},{methods_name}\n"
+                "# `emit_port` asks the emitter for the whole Rust port, which is a JOIN of\n"
+                "# this sheet with the ones named in port_from: a type row is a Rust item,\n"
+                "# its field rows are the struct body, its method rows are the impl. A\n"
+                "# single sheet cannot project a port, because the parts live in three\n"
+                "# relations. Only the server is marked, so only the server is ported.\n"
+                if label == "server"
+                else ""
+            )
+            + "# id_form: compound\n"
             f"# key_alias: {other}/types,{other}/triage,{fields_name},{other}/fields\n"
             "# A TYPE and a FIELD of its parent can fold to the same id, because ids\n"
             "# are lowercase (D7) while C# is case-sensitive: the field\n"
@@ -1012,6 +1045,15 @@ def emit_target(t: dict) -> int:
             "# kind is field|const|event|property|enum_member.\n"
             "# field_type is the declared C# type, verbatim, including generics and\n"
             "# array suffixes; the projection maps it, it is not rewritten here.\n"
+            "# `value` is the initializer of a const or an enum member, verbatim, and\n"
+            "# only when it is a simple literal; '-' otherwise. A string constant's\n"
+            "# value is stored WITHOUT its surrounding quotes, because a quoted cell\n"
+            "# is a token/merge hazard in the canonical form and the type is already\n"
+            "# declared `string`. Without this column the 14,880 constants here would\n"
+            "# project as names with no data.\n"
+            "# `ord` is the declaration order within the type, which the sheet's id\n"
+            "# sort would otherwise lose. A Rust struct's fields are projected in it,\n"
+            "# and an enum member with no explicit value takes the next index.\n"
             "# id_form: compound\n"
             f"# key_alias: {other}/fields,{types_name},{methods_name},{other}/methods\n"
             "# A field and a nested type can fold to the same id (see the types sheet,\n"
@@ -1022,7 +1064,7 @@ def emit_target(t: dict) -> int:
             "declarations (braces, get/set accessors, and statements that belong to "
             "an initializer)"
         ),
-    ) + "id:string*\ttype:string\tname:string\tfield_type:string\tkind:string\tmodifiers:string\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
+    ) + "id:string*\ttype:string\tname:string\tfield_type:string\tkind:string\tmodifiers:string\tvalue:string?\tord:u16\tstatus:string\tartifact:string\tref_addr:string\tref_conf:string\tevidence:string\n"
 
     mheader = manifest(
         methods_name, "methods", target_dir, f"{types_name},re/sources", "D1",

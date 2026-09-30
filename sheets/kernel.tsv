@@ -6,7 +6,20 @@
 # requires: -
 # owned_by: kernel-author
 # doctrine: D4
-# Hand-written algorithmic code ONLY. Empty means no kernel module exists yet.
-# Preflight (check 21) walks kernel/** and fails on any module not listed here,
-# and on any listed module whose path does not exist.
+# Hand-written algorithmic code ONLY. Preflight (check 21) walks kernel/** and
+# fails on any module not listed here, and on any listed module whose path does
+# not exist.
+#
+# The kernel crate owns two things: the GENERATED port it includes at build time,
+# and the hand-written modules that give that shape behaviour. Only the second is
+# listed here. `lib` is the crate root that includes the generated port, which is
+# why it is listed even though almost all of it is `include!`.
+#
+# The generated port is NOT here on purpose: it is a projection of the sheets and
+# is regenerated on every build, so there is no checked-in file for this allowlist
+# to gate (D6). What the allowlist gates is the part a human typed.
 id:string*	kind:string	rust_module:string	status:string	tests:string	notes:string?
+k0001	module	lib	done	-	the kernel crate root: includes the generated port from $OUT_DIR and declares the modules below
+k0002	module	args	done	-	mirrors Terraria.Utils.ParseArguements; inline tests cover the flag, value and duplicate rules (dec020)
+k0003	module	boot	done	-	mirrors Terraria.Program.LaunchGame as far as a stub port allows; inline tests
+k0004	build	build	done	-	the MDD 5.6 emit shim: runs the pipeline, emits the port and the per-sheet modules, hash-gated

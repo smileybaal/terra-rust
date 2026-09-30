@@ -1,0 +1,14 @@
+[package]
+name = "terraria-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The server binary: a thin shim over the kernel, which owns the generated port"
+publish = false
+
+[dependencies]
+terraria-kernel = { path = "../../kernel" }
+
+[[bin]]
+name = "terraria-server"
+path = "src/main.rs"

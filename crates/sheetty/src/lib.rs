@@ -87,6 +87,12 @@ pub struct Manifest {
     pub evidence_required: bool,
     pub id_compound: bool,
     pub emit_rust: bool,
+    /// Emit the whole Rust port from this sheet and the sheets it names in
+    /// `port_from`. A port is a JOIN of relations, so it cannot be produced from
+    /// any single sheet: the types sheet is the item, the fields sheet is the
+    /// struct body, the methods sheet is the `impl`.
+    pub emit_port: bool,
+    pub port_from: Vec<String>,
     pub key_alias: Vec<String>,
     /// How many records the producer emitted, and how many were deliberately
     /// not kept. `source_rows == rows + dropped` must hold, or evidence was
@@ -224,6 +230,10 @@ fn parse_manifest_line(line: &str, m: &mut Manifest) {
             "evidence" => m.evidence_required = v == "required",
             "id_form" => m.id_compound = v == "compound",
             "emit" => m.emit_rust = v == "rust",
+            "emit_port" => m.emit_port = v == "rust" || v == "true",
+            "port_from" => {
+                m.port_from = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "-").collect()
+            }
             "key_alias" => {
                 m.key_alias = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != "-").collect()
             }
@@ -2036,6 +2046,1081 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool, String> {
     Ok(true)
 }
 
+// ---------------------------------------------------------------------------
+// the port projection (MDD D2: one row, one strut)
+//
+// `re/<platform>/types`, `re/<platform>/fields` and `re/<platform>/methods` are
+// three relations, and a Rust item is a JOIN of them: the type row is the item,
+// its field rows are the struct body in DECLARATION order, and its method rows
+// are the `impl`. Nothing is written back to the sheets, so the sheets remain the
+// source of truth (D1).
+//
+// The projection is conservative in one direction on purpose: anything the
+// binary REFERENCES but does not DECLARE - the BCL, XNA, `IntPtr`, a delegate's
+// signature - resolves to a generated placeholder rather than being guessed at.
+// So the module always compiles, and the unresolved surface is visible and
+// countable instead of silently absent.
+// ---------------------------------------------------------------------------
+
+struct PortField {
+    kind: String,
+    name: String,
+    ty: String,
+    value: String,
+    /// Kept because it is what distinguishes a static member from an instance one;
+    /// the current projection puts both in an `impl`, so it is not read yet.
+    #[allow(dead_code)]
+    modifiers: String,
+}
+
+struct PortMethod {
+    name: String,
+    ret: String,
+    params: String,
+    modifiers: String,
+    kind: String,
+}
+
+struct PortType {
+    id: String,
+    kind: String,
+    /// The C# namespace, superseded by `mod_path` once the module tree is built.
+    #[allow(dead_code)]
+    ns: String,
+    name: String,
+    base_: String,
+    fields: Vec<PortField>,
+    methods: Vec<PortMethod>,
+    mod_path: Vec<String>,
+    item: String,
+}
+
+pub struct PortReport {
+    pub module: String,
+    pub path: String,
+    pub types: usize,
+    pub fields: usize,
+    pub methods: usize,
+    pub externs: usize,
+    pub gaps: usize,
+    pub bytes: usize,
+    pub written: bool,
+}
+
+/// A Rust identifier for a namespace segment. Lowercased, because a namespace is
+/// a module and a module that shares a name with a type in the same scope would
+/// shadow it.
+fn port_module(seg: &str) -> String {
+    let mut s: String = seg
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if s.is_empty() || s == "_" {
+        s = "m_unset".to_string();
+    }
+    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+        s = format!("m{s}");
+    }
+    // `crate`, `self`, `super` and `Self` cannot be raw identifiers at all, so a
+    // namespace with one of those names needs a different name rather than `r#`.
+    if matches!(s.as_str(), "crate" | "self" | "super" | "Self") {
+        s = format!("{s}_");
+    } else if RUST_KEYWORDS.contains(&s.as_str()) {
+        s = format!("r#{s}");
+    }
+    s
+}
+
+/// A Rust identifier for an item or a member. Case is PRESERVED: a C# type name
+/// is PascalCase and a field name may be `_serverIP`, and rewriting either would
+/// make the port harder to read against the source it came from. The generated
+/// module allows the resulting non-snake-case lint.
+fn port_ident(s: &str) -> String {
+    let mut t: String = s
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    // `_` is reserved and cannot name anything, and a name that sanitized away to
+    // nothing has to become something.
+    if t.is_empty() || t == "_" || t.trim_matches('_').is_empty() {
+        t = format!("{t}unnamed");
+    }
+    if t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+        t = format!("_{t}");
+    }
+    if matches!(t.as_str(), "crate" | "self" | "super" | "Self") {
+        t = format!("{t}_");
+    } else if RUST_KEYWORDS.contains(&t.as_str()) {
+        t = format!("r#{t}");
+    }
+    t
+}
+
+/// Where a C# type name went. `Local` is a path into this module; `Extern` is a
+/// placeholder for something not declared here.
+struct Resolver {
+    by_id: BTreeMap<String, (Vec<String>, String)>,
+    by_name: BTreeMap<String, Vec<String>>,
+    /// id -> kind, so a resolved INTERFACE can be boxed where it is used as a type
+    kinds: BTreeMap<String, String>,
+    externs: BTreeMap<String, BTreeSet<usize>>,
+    ambiguous: BTreeSet<String>,
+    gaps: BTreeSet<String>,
+}
+
+impl Resolver {
+    fn path_of(&self, id: &str) -> Option<String> {
+        self.by_id.get(id).map(|(segs, item)| {
+            let mut p = String::from("crate::port");
+            for s in segs {
+                p.push_str("::");
+                p.push_str(s);
+            }
+            p.push_str("::");
+            p.push_str(item);
+            p
+        })
+    }
+
+    /// The Rust path for a C# type expression, recursing through generics, arrays
+    /// and nullables. `ctx` is the id of the type that mentions it, which is what
+    /// lets `Settings` inside `Terraria.Player` resolve to `Terraria.Player.Settings`
+    /// rather than to some other `Settings`.
+    fn map(&mut self, expr: &str, ctx: &str, depth: u32) -> String {
+        if depth > 8 {
+            return self.placeholder("RecursionGuard", 0, &[]);
+        }
+        let mut t = expr.trim();
+        for pre in ["params ", "this ", "ref ", "out ", "in ", "scoped "] {
+            if let Some(rest) = t.strip_prefix(pre) {
+                t = rest.trim();
+            }
+        }
+        if t.is_empty() {
+            return "()".to_string();
+        }
+        if t == "void" || t == "Void" {
+            return "()".to_string();
+        }
+        // `T[]` and `T[,]` both become a vector; the rank is lost, which is a
+        // recorded gap rather than a silent lie
+        if let Some(inner) = t.strip_suffix("[]") {
+            return format!("Vec<{}>", self.map(inner, ctx, depth + 1));
+        }
+        if let Some(inner) = t.strip_suffix("[,]") {
+            self.gaps.insert(format!("array rank 2: {t}"));
+            return format!("Vec<{}>", self.map(inner, ctx, depth + 1));
+        }
+        if let Some(inner) = t.strip_suffix('*') {
+            return format!("*mut {}", self.map(inner, ctx, depth + 1));
+        }
+        if let Some(inner) = t.strip_suffix('?') {
+            return format!("Option<{}>", self.map(inner, ctx, depth + 1));
+        }
+        if let Some(rest) = t.strip_prefix("global::") {
+            t = rest;
+        }
+
+        let prim = match t {
+            "bool" | "Boolean" => Some("bool"),
+            "byte" | "Byte" => Some("u8"),
+            "sbyte" | "SByte" => Some("i8"),
+            "short" | "Int16" => Some("i16"),
+            "ushort" | "UInt16" => Some("u16"),
+            "int" | "Int32" => Some("i32"),
+            "uint" | "UInt32" => Some("u32"),
+            "long" | "Int64" => Some("i64"),
+            "ulong" | "UInt64" => Some("u64"),
+            "float" | "Single" => Some("f32"),
+            "double" | "Double" => Some("f64"),
+            "decimal" => Some("f64"),
+            "char" | "Char" => Some("char"),
+            "string" | "String" => Some("String"),
+            "object" | "Object" => Some("crate::port::externs::Object"),
+            "IntPtr" => Some("isize"),
+            "UIntPtr" => Some("usize"),
+            "nint" => Some("isize"),
+            "nuint" => Some("usize"),
+            "nfdresult_t" => Some("i32"),
+            _ => None,
+        };
+        if let Some(p) = prim {
+            return p.to_string();
+        }
+
+        // generic: split the head from the arguments at the OUTERMOST '<'
+        if let Some(open) = t.find('<') {
+            if t.ends_with('>') {
+                let head = t[..open].trim();
+                let inner = &t[open + 1..t.len() - 1];
+                let args: Vec<String> = split_type_args(inner);
+                let mapped: Vec<String> = args.iter().map(|a| self.map(a, ctx, depth + 1)).collect();
+                let bare = head.rsplit('.').next().unwrap_or(head);
+                return match bare {
+                    "List" | "IList" | "IEnumerable" | "ICollection" | "IReadOnlyList"
+                    | "IReadOnlyCollection" | "Queue" | "Stack" => format!("Vec<{}>", mapped.join(", ")),
+                    "HashSet" | "ISet" => format!("std::collections::BTreeSet<{}>", mapped.join(", ")),
+                    "Dictionary" | "IDictionary" | "IReadOnlyDictionary" | "SortedDictionary"
+                    | "SortedList" => format!("std::collections::BTreeMap<{}>", mapped.join(", ")),
+                    "Nullable" => format!("Option<{}>", mapped.join(", ")),
+                    "KeyValuePair" => format!("({})", mapped.join(", ")),
+                    "Action" => format!("Box<dyn Fn({})>", mapped.join(", ")),
+                    "Func" if mapped.len() >= 2 => {
+                        let r = mapped.last().cloned().unwrap_or_default();
+                        format!("Box<dyn Fn({}) -> {}>", mapped[..mapped.len() - 1].join(", "), r)
+                    }
+                    "Func" => format!("Box<dyn Fn() -> {}>", mapped.join(", ")),
+                    "Predicate" => format!("Box<dyn Fn({}) -> bool>", mapped.join(", ")),
+                    "Comparison" => format!("Box<dyn Fn({}) -> i32>", mapped.join(", ")),
+                    "ValueTuple" | "Tuple" => format!("({})", mapped.join(", ")),
+                    _ => self.placeholder(&port_ident(bare), mapped.len(), &mapped),
+                };
+            }
+        }
+
+        if t == "Action" {
+            return "Box<dyn Fn()>".to_string();
+        }
+
+        // a named type: prefer the one in the context's own namespace, then a
+        // unique match, then the first match in sorted order (deterministic), and
+        // record it when the choice was a guess
+        let bare = t.rsplit('.').next().unwrap_or(t).to_string();
+        let lower = bare.to_lowercase();
+        let ctx_ns = ctx.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or_default();
+        let own = format!("{ctx_ns}.{lower}");
+        if let Some(p) = self.local_as_type(own.trim_start_matches('.')) {
+            return p;
+        }
+        let candidates = self.by_name.get(&lower).cloned().unwrap_or_default();
+        if candidates.len() == 1 {
+            if let Some(p) = self.local_as_type(&candidates[0]) {
+                return p;
+            }
+        }
+        if candidates.len() > 1 {
+            // an inner-most match wins; anything else is a recorded ambiguity
+            let mut best: Option<String> = None;
+            for c in &candidates {
+                if c.starts_with(&ctx_ns) {
+                    best = Some(c.clone());
+                    break;
+                }
+            }
+            if let Some(b) = best {
+                if let Some(p) = self.local_as_type(&b) {
+                    return p;
+                }
+            }
+            self.ambiguous.insert(bare.clone());
+            if let Some(p) = self.local_as_type(&candidates[0]) {
+                return p;
+            }
+        }
+        self.placeholder(&port_ident(&bare), 0, &[])
+    }
+
+    /// A local type used as a TYPE (a field, a parameter, a return). An interface
+    /// is a trait in Rust and cannot be a bare type, so it is boxed; the alternative
+    /// is 136 `expected a type, found a trait` errors.
+    fn local_as_type(&self, id: &str) -> Option<String> {
+        let p = self.path_of(id)?;
+        if self.kinds.get(id).map(|k| k == "interface").unwrap_or(false) {
+            Some(format!("Box<dyn {p}>"))
+        } else {
+            Some(p)
+        }
+    }
+
+    /// Record a reference to something the binary does not declare, and return the
+    /// path to its placeholder.
+    ///
+    /// Arity is part of the NAME (`Foo` is arity 0, `Foo_a2` is arity 2) rather
+    /// than a suffix applied only when a name is used at several arities. That
+    /// matters because the name has to be known at REFERENCE time, while the set
+    /// of arities a name is used at is only known after every reference has been
+    /// seen. It is also always unambiguous: `Foo` can only ever mean arity 0.
+    fn placeholder(&mut self, name: &str, arity: usize, args: &[String]) -> String {
+        let e = self.externs.entry(name.to_string()).or_default();
+        e.insert(arity);
+        if arity == 0 {
+            format!("crate::port::externs::{name}")
+        } else {
+            format!("crate::port::externs::{name}_a{arity}<{}>", args.join(", "))
+        }
+    }
+
+    /// The item name for an extern at a given arity, as `placeholder` builds it.
+    fn placeholder_item(name: &str, arity: usize) -> String {
+        if arity == 0 {
+            name.to_string()
+        } else {
+            format!("{name}_a{arity}")
+        }
+    }
+}
+
+/// Split `A, B<C, D>` into `["A", "B<C, D>"]`.
+fn split_type_args(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut cur = String::new();
+    for c in s.chars() {
+        match c {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            _ => {}
+        }
+        if c == ',' && depth == 0 {
+            out.push(cur.trim().to_string());
+            cur.clear();
+            continue;
+        }
+        cur.push(c);
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
+}
+
+/// True when `v` is a SINGLE numeric literal and not an expression.
+///
+/// `1f / 60.0` is a real constant initializer in the source, and taking it verbatim
+/// produced `pub const WAVE_FRAMERATE: f32 = 1f / 60.0;`, which rustc rejects for the
+/// suffix. The expression is not evaluated: a constant we cannot state exactly is
+/// left out rather than approximated.
+fn is_single_number(v: &str) -> bool {
+    let body = v.strip_prefix(['-', '+']).unwrap_or(v);
+    if body.is_empty() {
+        return false;
+    }
+    let mut prev = '\0';
+    for c in body.chars() {
+        let ok = c.is_ascii_digit()
+            || c == '_'
+            || c == '.'
+            || c == 'x'
+            || c == 'X'
+            || (c.is_ascii_hexdigit() && prev == 'x')
+            || ((c == '+' || c == '-') && (prev == 'e' || prev == 'E'))
+            || c == 'e'
+            || c == 'E';
+        if !ok {
+            return false;
+        }
+        prev = c;
+    }
+    body.chars().any(|c| c.is_ascii_digit())
+}
+
+/// A C# constant initializer as a Rust literal, or None when it is not something
+/// we can state faithfully. A guessed constant is worse than an absent one: it
+/// would put a plausible wrong number in an ID table.
+fn cs_const_literal(rust_ty: &str, cs: &str) -> Option<String> {
+    let v = cs.trim();
+    if v.is_empty() || v == "-" {
+        return None;
+    }
+    match rust_ty {
+        "bool" => match v {
+            "true" => Some("true".to_string()),
+            "false" => Some("false".to_string()),
+            _ => None,
+        },
+        "f32" | "f64" => {
+            // strip ONE trailing C# suffix, if there is one
+            let t = if v.ends_with(['f', 'F', 'd', 'D']) { &v[..v.len() - 1] } else { v };
+            if !is_single_number(t) {
+                return None;
+            }
+            if t.contains('.') || t.contains('e') || t.contains('E') {
+                Some(t.to_string())
+            } else {
+                Some(format!("{t}.0"))
+            }
+        }
+        "String" | "&str" => Some(format!("{v:?}")),
+        "char" => {
+            if v.starts_with('\'') && v.ends_with('\'') && v.len() >= 3 {
+                Some(v.to_string())
+            } else {
+                None
+            }
+        }
+        t if t.starts_with('i') || t.starts_with('u') => {
+            // ONLY a plain integer or a hex integer, and only a single literal. An
+            // earlier version accepted any run of hex digits, so `1f` - a float with a
+            // suffix - passed as `1f` and rustc rejected it as an invalid suffix.
+            let x = if v.ends_with(['u', 'U', 'l', 'L']) { &v[..v.len() - 1] } else { v };
+            if !is_single_number(x) || x.contains(['.', 'f', 'F']) {
+                return None;
+            }
+            let body = x.strip_prefix(['-', '+']).unwrap_or(x);
+            let hex = body
+                .strip_prefix("0x")
+                .or_else(|| body.strip_prefix("0X"))
+                .map(|h| !h.is_empty() && h.chars().all(|c| c.is_ascii_hexdigit() || c == '_'))
+                .unwrap_or(false);
+            let dec = !body.is_empty() && body.chars().all(|c| c.is_ascii_digit() || c == '_');
+            if hex || dec {
+                Some(x.to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// A nested module tree, built from the dotted namespace paths.
+#[derive(Default)]
+struct ModNode {
+    children: BTreeMap<String, ModNode>,
+    items: Vec<String>,
+}
+
+impl ModNode {
+    fn insert(&mut self, path: &[String], item: String) {
+        match path.split_first() {
+            Some((head, rest)) => self
+                .children
+                .entry(head.clone())
+                .or_default()
+                .insert(rest, item),
+            None => self.items.push(item),
+        }
+    }
+
+    fn render(&self, indent: usize, out: &mut String) {
+        let pad = "    ".repeat(indent);
+        for (name, child) in &self.children {
+            let _ = writeln!(out, "{pad}pub mod {name} {{");
+            child.render(indent + 1, out);
+            let _ = writeln!(out, "{pad}}}");
+        }
+        for it in &self.items {
+            for line in it.lines() {
+                if line.is_empty() {
+                    let _ = writeln!(out);
+                } else {
+                    let _ = writeln!(out, "{pad}{line}");
+                }
+            }
+        }
+    }
+}
+
+/// Assemble the port from the sheets. Returns the source and a report.
+pub fn emit_port_source(sheets: &[Sheet]) -> Result<(String, PortReport), String> {
+    let anchor = sheets
+        .iter()
+        .find(|s| s.manifest.emit_port)
+        .ok_or_else(|| "no sheet declares `emit_port`".to_string())?;
+    let mut wanted: Vec<String> = vec![anchor.name.clone()];
+    wanted.extend(anchor.manifest.port_from.iter().cloned());
+    let find = |n: &str| sheets.iter().find(|s| s.name == n);
+
+    let types = find(&anchor.name).ok_or("missing the types sheet")?;
+    let fields = find(&wanted[1]).ok_or_else(|| format!("missing the fields sheet {}", wanted[1]))?;
+    let methods = find(&wanted[2]).ok_or_else(|| format!("missing the methods sheet {}", wanted[2]))?;
+
+    // --- join the three relations -----------------------------------------
+    let mut recs: Vec<PortType> = Vec::with_capacity(types.rows.len());
+    let mut index: BTreeMap<String, usize> = BTreeMap::new();
+    for r in &types.rows {
+        let id = types.cell(r, "id").unwrap_or("").to_string();
+        let ns = types.cell(r, "namespace").unwrap_or("-").to_string();
+        let name = types.cell(r, "name").unwrap_or("").to_string();
+        let mod_path: Vec<String> = if ns == "-" || ns.is_empty() {
+            Vec::new()
+        } else {
+            ns.split('.').map(port_module).collect()
+        };
+        let item = port_ident(&name);
+        index.insert(id.clone(), recs.len());
+        recs.push(PortType {
+            id,
+            kind: types.cell(r, "kind").unwrap_or("class").to_string(),
+            ns,
+            name,
+            base_: types.cell(r, "base").unwrap_or("-").to_string(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            mod_path,
+            item,
+        });
+    }
+
+    let mut field_rows: Vec<&Row> = fields.rows.iter().collect();
+    field_rows.sort_by_key(|r| {
+        fields.cell(r, "ord").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0)
+    });
+    let mut n_fields = 0usize;
+    for r in field_rows {
+        let owner = fields.cell(r, "type").unwrap_or("");
+        let Some(&i) = index.get(owner) else { continue };
+        recs[i].fields.push(PortField {
+            kind: fields.cell(r, "kind").unwrap_or("field").to_string(),
+            name: fields.cell(r, "name").unwrap_or("").to_string(),
+            ty: fields.cell(r, "field_type").unwrap_or("-").to_string(),
+            value: fields.cell(r, "value").unwrap_or("-").to_string(),
+            modifiers: fields.cell(r, "modifiers").unwrap_or("-").to_string(),
+        });
+        n_fields += 1;
+    }
+    let mut n_methods = 0usize;
+    for r in &methods.rows {
+        let owner = methods.cell(r, "type").unwrap_or("");
+        let Some(&i) = index.get(owner) else { continue };
+        recs[i].methods.push(PortMethod {
+            name: methods.cell(r, "name").unwrap_or("").to_string(),
+            ret: methods.cell(r, "ret").unwrap_or("void").to_string(),
+            params: methods.cell(r, "params").unwrap_or("").to_string(),
+            modifiers: methods.cell(r, "modifiers").unwrap_or("-").to_string(),
+            kind: methods.cell(r, "kind").unwrap_or("method").to_string(),
+        });
+        n_methods += 1;
+    }
+
+    // --- the resolver ------------------------------------------------------
+    let mut res = Resolver {
+        by_id: BTreeMap::new(),
+        by_name: BTreeMap::new(),
+        kinds: BTreeMap::new(),
+        externs: BTreeMap::new(),
+        ambiguous: BTreeSet::new(),
+        gaps: BTreeSet::new(),
+    };
+    // two types can share a bare name inside one module (UIDynamicItemCollection
+    // has a generic and a non-generic form), and Rust cannot; disambiguate
+    // deterministically and record it
+    let mut used: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+    let mut n_collide = 0usize;
+    for r in recs.iter_mut() {
+        let taken = used.entry(r.mod_path.clone()).or_default();
+        if taken.contains(&r.item) {
+            n_collide += 1;
+            let mut n = 2;
+            while taken.contains(&format!("{}_{n}", r.item)) {
+                n += 1;
+            }
+            r.item = format!("{}_{n}", r.item);
+        }
+        taken.insert(r.item.clone());
+        res.by_id
+            .insert(r.id.clone(), (r.mod_path.clone(), r.item.clone()));
+        res.kinds.insert(r.id.clone(), r.kind.clone());
+        res.by_name.entry(r.name.to_lowercase()).or_default().push(r.id.clone());
+    }
+
+    // A MODULE and an ITEM cannot share a name in one scope, and a root-namespace
+    // type called `nativefiledialog` next to a namespace of the same name is a real
+    // collision. Rename the module, before any path is built from it.
+    let mut child_names: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+    let mut item_names: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+    for r in &recs {
+        item_names
+            .entry(r.mod_path.clone())
+            .or_default()
+            .insert(r.item.clone());
+        for i in 0..r.mod_path.len() {
+            child_names
+                .entry(r.mod_path[..i].to_vec())
+                .or_default()
+                .insert(r.mod_path[i].clone());
+        }
+    }
+    let mut renamed: BTreeMap<(Vec<String>, String), String> = BTreeMap::new();
+    for (parent, kids) in &child_names {
+        let items = item_names.get(parent);
+        for k in kids {
+            if items.map(|i| i.contains(k)).unwrap_or(false) {
+                renamed.insert((parent.clone(), k.clone()), format!("{k}_mod"));
+                res.gaps.insert(format!("module renamed to avoid an item: {k}"));
+            }
+        }
+    }
+    if !renamed.is_empty() {
+        for r in recs.iter_mut() {
+            if r.mod_path.is_empty() {
+                continue;
+            }
+            let clone = r.mod_path.clone();
+            for i in 0..clone.len() {
+                if let Some(n) = renamed.get(&(clone[..i].to_vec(), clone[i].clone())) {
+                    r.mod_path[i] = n.clone();
+                }
+            }
+        }
+        for r in &recs {
+            res.by_id
+                .insert(r.id.clone(), (r.mod_path.clone(), r.item.clone()));
+        }
+    }
+
+    // Break field cycles among local types.
+    //
+    // A C# CLASS field is a reference, so boxing it is what the original means; a
+    // C# struct field is a value, and a cycle through value fields cannot have
+    // finite size in either language - the decompiler flattens a reference into
+    // what looks like a value. Either way, the edge that CLOSES a cycle is boxed,
+    // and only that edge, so 100 types do not all grow a Box they do not need.
+    let mut boxed_fields: BTreeSet<(String, String)> = BTreeSet::new();
+    {
+        fn dfs(
+            u: usize,
+            adj: &[Vec<usize>],
+            color: &mut Vec<u8>,
+            back: &mut BTreeSet<(usize, usize)>,
+        ) {
+            color[u] = 1;
+            for &v in &adj[u] {
+                if color[v] == 1 {
+                    back.insert((u, v));
+                } else if color[v] == 0 {
+                    dfs(v, adj, color, back);
+                }
+            }
+            color[u] = 2;
+        }
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); recs.len()];
+        let mut edge_name: BTreeMap<(usize, usize), Vec<String>> = BTreeMap::new();
+        for (i, r) in recs.iter().enumerate() {
+            for f in &r.fields {
+                if !matches!(f.kind.as_str(), "field" | "property" | "event") {
+                    continue;
+                }
+                let ty = f.ty.trim();
+                if ty.contains(['<', '[', '*', '?']) {
+                    continue;
+                }
+                let bare = ty.rsplit('.').next().unwrap_or(ty).to_lowercase();
+                let ctx_ns = r.id.rsplit_once('.').map(|(a, _)| a.to_string()).unwrap_or_default();
+                let own = format!("{ctx_ns}.{bare}");
+                let cand = if index.contains_key(own.trim_start_matches('.')) {
+                    Some(own.trim_start_matches('.').to_string())
+                } else {
+                    match res.by_name.get(&bare) {
+                        Some(c) if c.len() == 1 => Some(c[0].clone()),
+                        _ => None,
+                    }
+                };
+                if let Some(tid) = cand {
+                    if let Some(&j) = index.get(&tid) {
+                        if matches!(recs[j].kind.as_str(), "class" | "struct") {
+                            adj[i].push(j);
+                            edge_name.entry((i, j)).or_default().push(f.name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let mut color = vec![0u8; recs.len()];
+        let mut back: BTreeSet<(usize, usize)> = BTreeSet::new();
+        for i in 0..recs.len() {
+            if color[i] == 0 {
+                dfs(i, &adj, &mut color, &mut back);
+            }
+        }
+        for (i, j) in &back {
+            if let Some(names) = edge_name.get(&(*i, *j)) {
+                for n in names {
+                    boxed_fields.insert((recs[*i].id.clone(), n.clone()));
+                }
+            }
+        }
+        if !boxed_fields.is_empty() {
+            res.gaps.insert(format!(
+                "{} field(s) boxed to break a size cycle",
+                boxed_fields.len()
+            ));
+        }
+    }
+
+    // An interface's own interface bases. `IPooledParticle: IParticle` means an
+    // `impl IPooledParticle for X` does NOT satisfy the supertrait bound unless X
+    // also has `impl IParticle`.
+    let mut iface_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for r in &recs {
+        if r.kind != "interface" {
+            continue;
+        }
+        let mut v = Vec::new();
+        for b in r.base_.split(',') {
+            let bl = b.trim().to_lowercase();
+            if bl.is_empty() {
+                continue;
+            }
+            if let Some(c) = res.by_name.get(&bl) {
+                if c.len() == 1
+                    && index
+                        .get(&c[0])
+                        .map(|&i| recs[i].kind == "interface")
+                        .unwrap_or(false)
+                {
+                    v.push(c[0].clone());
+                }
+            }
+        }
+        iface_parents.insert(r.id.clone(), v);
+    }
+
+    // --- render ------------------------------------------------------------
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "// GENERATED BY sheetty v{EMITTER_VERSION} FROM {} + {} + {} - DO NOT EDIT",
+        types.name, fields.name, methods.name
+    );
+    let _ = writeln!(out, "// sources:  sheets/{}", types.rel);
+    let _ = writeln!(out, "//           sheets/{}", fields.rel);
+    let _ = writeln!(out, "//           sheets/{}", methods.rel);
+    let _ = writeln!(out, "// rows:     {} types, {} fields, {} methods", recs.len(), n_fields, n_methods);
+    let _ = writeln!(out, "//");
+    let _ = writeln!(out, "// Hand edits are lost on the next build (MDD D6). Change the sheets instead.");
+    let _ = writeln!(out);
+    let _ = writeln!(out, "// A Rust item is a JOIN of three relations: the type row is the item, its");
+    let _ = writeln!(out, "// field rows are the struct body in declaration order, its method rows are");
+    let _ = writeln!(out, "// the impl. Every body is a stub: this is the shape of the server, not its");
+    let _ = writeln!(out, "// behaviour. Names keep their C# case so the port reads against the source.");
+    let _ = writeln!(out);
+    // Inner attributes are NOT permitted inside `include!`, which is how this file
+    // is used, so the lints are allowed by the including module instead (kernel/lib.rs).
+    let _ = writeln!(out);
+
+    // items, grouped into a real module TREE
+    //
+    // Keying this by full path and emitting a fresh `pub mod terraria { .. }` per
+    // path defines `terraria` once per namespace under it, which rustc rejects as
+    // 409 duplicate definitions. The tree has to be nested, not flat.
+    let mut tree = ModNode::default();
+    let mut trait_impls: Vec<String> = Vec::new();
+    for r in &recs {
+        let mut item = String::new();
+        let doc = format!("/// `{}` ({}) from the {} sheet.", r.id, r.kind, types.name);
+        let _ = writeln!(item, "{doc}");
+        match r.kind.as_str() {
+            "enum" => {
+                let _ = writeln!(item, "pub enum {} {{", r.item);
+                let mut next: i64 = 0;
+                let mut seen: BTreeSet<String> = BTreeSet::new();
+                let mut used_values: BTreeSet<i64> = BTreeSet::new();
+                for f in &r.fields {
+                    if f.kind != "enum_member" {
+                        continue;
+                    }
+                    let mut v = port_ident(&f.name);
+                    if v == r.item || seen.contains(&v) {
+                        v = format!("{v}_");
+                    }
+                    seen.insert(v.clone());
+                    let mut disc = match f.value.trim().parse::<i64>() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            // no explicit value in the source: C# numbers from the
+                            // previous member, which `ord` preserves
+                            next
+                        }
+                    };
+                    // Rust rejects a repeated discriminant; a C# enum may legitimately
+                    // have one (`A = 1, B = 1`), so nudge it rather than fail to build
+                    while used_values.contains(&disc) {
+                        disc += 1;
+                    }
+                    used_values.insert(disc);
+                    next = disc + 1;
+                    let _ = writeln!(item, "    {v} = {disc},");
+                }
+                let _ = writeln!(item, "}}\n");
+            }
+            "interface" => {
+                // An interface that extends interfaces is a Rust SUPERTRAIT, not an
+                // `impl`. Emitting `impl A for B` where B is also a trait is 18
+                // `expected a type, found a trait` errors.
+                let mut supers: Vec<String> = Vec::new();
+                for b in r.base_.split(',') {
+                    let b = b.trim();
+                    if b.is_empty() {
+                        continue;
+                    }
+                    if let Some(cands) = res.by_name.get(&b.to_lowercase()) {
+                        if cands.len() == 1 {
+                            if let Some(&bi) = index.get(&cands[0]) {
+                                if recs[bi].kind == "interface" {
+                                    if let Some(p) = res.path_of(&cands[0]) {
+                                        supers.push(p);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                supers.sort();
+                supers.dedup();
+                if supers.is_empty() {
+                    let _ = writeln!(item, "pub trait {} {{", r.item);
+                } else {
+                    let _ = writeln!(item, "pub trait {}: {} {{", r.item, supers.join(" + "));
+                }
+                let mut seen: BTreeSet<String> = BTreeSet::new();
+                for m in &r.methods {
+                    let mut sig = port_method_sig(&mut res, m, &r.id, &mut seen);
+                    if sig.is_empty() {
+                        continue;
+                    }
+                    sig.push_str(" { unimplemented!() }");
+                    let _ = writeln!(item, "    {sig}");
+                }
+                let _ = writeln!(item, "}}\n");
+            }
+            "delegate" => {
+                // the delegate's signature is not in the book (a delegate is a
+                // type declaration, not a member), so it is projected as an
+                // opaque marker rather than invented
+                res.gaps.insert(format!("delegate signature: {}", r.id));
+                let _ = writeln!(item, "pub struct {};\n", r.item);
+            }
+            _ => {
+                let _ = writeln!(item, "pub struct {} {{", r.item);
+                let own_path = res.path_of(&r.id).unwrap_or_default();
+                let mut seen: BTreeSet<String> = BTreeSet::new();
+                for f in &r.fields {
+                    if !matches!(f.kind.as_str(), "field" | "property" | "event") {
+                        continue;
+                    }
+                    let mut n = port_ident(&f.name);
+                    if seen.contains(&n) {
+                        let mut k = 2;
+                        while seen.contains(&format!("{n}_{k}")) {
+                            k += 1;
+                        }
+                        n = format!("{n}_{k}");
+                    }
+                    seen.insert(n.clone());
+                    let ty = res.map(&f.ty, &r.id, 0);
+                    // a field of the struct's OWN type, or the edge that closes a
+                    // cycle, has infinite size unless it is boxed
+                    let ty = if ty == own_path
+                        || boxed_fields.contains(&(r.id.clone(), f.name.clone()))
+                    {
+                        format!("Box<{ty}>")
+                    } else {
+                        ty
+                    };
+                    let _ = writeln!(item, "    pub {n}: {ty},");
+                }
+                let _ = writeln!(item, "}}\n");
+            }
+        }
+
+        // the impl: constants, then methods
+        if matches!(r.kind.as_str(), "class" | "struct") {
+            let mut body = String::new();
+            for f in &r.fields {
+                if f.kind != "const" {
+                    continue;
+                }
+                let ty = res.map(&f.ty, &r.id, 0);
+                // a Rust `const` cannot hold a `String`
+                let ty = if ty == "String" { "&'static str".to_string() } else { ty };
+                let Some(lit) = cs_const_literal(&ty, &f.value) else {
+                    res.gaps.insert(format!("const value: {}", f.name));
+                    continue;
+                };
+                let _ = writeln!(body, "    pub const {}: {} = {};", port_ident(&f.name), ty, lit);
+            }
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            for m in &r.methods {
+                let sig = port_method_sig(&mut res, m, &r.id, &mut seen);
+                if sig.is_empty() {
+                    continue;
+                }
+                let _ = writeln!(body, "    {sig} {{ unimplemented!() }}");
+            }
+            if !body.is_empty() {
+                let _ = writeln!(item, "impl {} {{", r.item);
+                item.push_str(&body);
+                let _ = writeln!(item, "}}\n");
+            }
+        }
+
+        // an interface base becomes a real impl, which the trait's default bodies
+        // make legal
+        if r.base_ != "-" {
+            for b in r.base_.split(',') {
+                let b = b.trim();
+                if b.is_empty() {
+                    continue;
+                }
+                let bl = b.to_lowercase();
+                if let Some(cands) = res.by_name.get(&bl) {
+                    if cands.len() == 1 {
+                        if let Some(&bi) = index.get(&cands[0]) {
+                            if recs[bi].kind == "interface" && r.kind != "interface" {
+                                let sp = res.path_of(&r.id).unwrap_or_default();
+                                // the trait, and every interface it extends, or the
+                                // impl does not satisfy the supertrait bound
+                                let mut stack = vec![cands[0].clone()];
+                                let mut seen_t: BTreeSet<String> = BTreeSet::new();
+                                while let Some(t) = stack.pop() {
+                                    if !seen_t.insert(t.clone()) {
+                                        continue;
+                                    }
+                                    if let Some(p) = res.path_of(&t) {
+                                        trait_impls.push(format!("impl {p} for {sp} {{}}"));
+                                    }
+                                    if let Some(ps) = iface_parents.get(&t) {
+                                        for p in ps {
+                                            stack.push(p.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        tree.insert(&r.mod_path, item);
+    }
+
+    // --- externs -----------------------------------------------------------
+    let mut ext_items: Vec<String> = Vec::new();
+    for (name, arities) in &res.externs {
+        for &a in arities {
+            let item = Resolver::placeholder_item(name, a);
+            if a == 0 {
+                ext_items.push(format!("/// Referenced by the server but not declared in it.\npub struct {item};"));
+            } else if a == 1 {
+                ext_items.push(format!(
+                    "/// Referenced by the server but not declared in it.\npub struct {item}<T0>(pub core::marker::PhantomData<T0>);"
+                ));
+            } else {
+                let gens: Vec<String> = (0..a).map(|i| format!("T{i}")).collect();
+                // a TUPLE inside PhantomData, because PhantomData takes exactly one
+                // type parameter and `PhantomData<T0, T1>` does not compile
+                ext_items.push(format!(
+                    "/// Referenced by the server but not declared in it.\npub struct {item}<{}>(pub core::marker::PhantomData<({})>);",
+                    gens.join(", "),
+                    gens.join(", ")
+                ));
+            }
+        }
+    }
+
+    // --- write it out ------------------------------------------------------
+    let _ = writeln!(out, "/// Types the server references but does not declare: the BCL, XNA, and the");
+    let _ = writeln!(out, "/// delegates whose signatures are not in the book. Generated so the port");
+    let _ = writeln!(out, "/// compiles; replace them with real definitions as they are ported.");
+    let _ = writeln!(out, "pub mod externs {{");
+    let _ = writeln!(out, "    #![allow(non_camel_case_types)]");
+    let _ = writeln!(out, "    /// A stand-in for `System.Object`.");
+    let _ = writeln!(out, "    pub struct Object;");
+    for it in &ext_items {
+        for line in it.lines() {
+            let _ = writeln!(out, "    {line}");
+        }
+    }
+    let _ = writeln!(out, "}}\n");
+
+    tree.render(0, &mut out);
+
+    if !trait_impls.is_empty() {
+        trait_impls.sort();
+        trait_impls.dedup();
+        let _ = writeln!(out, "\n/// Interface inheritance, projected as real trait impls.");
+        for t in &trait_impls {
+            let _ = writeln!(out, "{t}");
+        }
+    }
+
+    let report = PortReport {
+        module: "port".to_string(),
+        path: String::new(),
+        types: recs.len(),
+        fields: n_fields,
+        methods: n_methods,
+        externs: ext_items.len(),
+        gaps: res.gaps.len(),
+        bytes: out.len(),
+        written: false,
+    };
+    let _ = n_collide;
+    let _ = res.ambiguous.len();
+    Ok((out, report))
+}
+
+/// One method as a Rust signature, with overload and keyword handling. Returns an
+/// empty string when the method cannot be named at all.
+fn port_method_sig(
+    res: &mut Resolver,
+    m: &PortMethod,
+    owner_id: &str,
+    seen: &mut BTreeSet<String>,
+) -> String {
+    let base = if m.kind == "ctor" {
+        "new".to_string()
+    } else {
+        let raw = m.name.trim();
+        if raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !raw.is_empty() {
+            port_ident(raw)
+        } else {
+            // `operator !=` and friends are not identifiers; the id already
+            // carries a stable word for them
+            port_ident(
+                &raw
+                    .replace("operator ", "op_")
+                    .replace('!', "ne")
+                    .replace('=', "eq"),
+            )
+        }
+    };
+    if base.is_empty() || base == "r#" {
+        return String::new();
+    }
+    let mut name = base.clone();
+    if seen.contains(&name) {
+        let mut k = 2;
+        while seen.contains(&format!("{base}_{k}")) {
+            k += 1;
+        }
+        name = format!("{base}_{k}");
+    }
+    seen.insert(name.clone());
+
+    let mut args: Vec<String> = Vec::new();
+    let is_static = m.modifiers.split_whitespace().any(|w| w == "static");
+    if m.kind != "ctor" && !is_static {
+        args.push("&self".to_string());
+    }
+    for p in m.params.split(';') {
+        let p = p.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let (pname, ptype) = match p.split_once(':') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => ("arg", p),
+        };
+        let pname = port_ident(pname);
+        let pname = if pname == "self" { "this".to_string() } else { pname };
+        args.push(format!("{pname}: {}", res.map(ptype, owner_id, 0)));
+    }
+    let ret = if m.kind == "ctor" {
+        "Self".to_string()
+    } else {
+        res.map(&m.ret, owner_id, 0)
+    };
+    if ret == "()" {
+        format!("pub fn {name}({})", args.join(", "))
+    } else {
+        format!("pub fn {name}({}) -> {ret}", args.join(", "))
+    }
+}
+
 /// Run the whole emit stage. Refuses to emit when preflight has errors (D5).
 pub fn emit_run(sheets_dir: &Path, out_dir: &Path) -> Result<Vec<EmitReport>, String> {
     let (sheets, mut findings) = load_book(sheets_dir);
@@ -2080,6 +3165,22 @@ pub fn emit_run(sheets_dir: &Path, out_dir: &Path) -> Result<Vec<EmitReport>, St
         bytes: reg.len(),
         written,
     });
+
+    // The port is a projection of several sheets, not of one, so it is written
+    // once rather than per sheet. `emit_port` is how a sheet asks for it.
+    if sheets.iter().any(|s| s.manifest.emit_port) {
+        let (src, _rep) = emit_port_source(&sheets)?;
+        let ppath = out_dir.join("port.rs");
+        let written = write_if_changed(&ppath, src.as_bytes())?;
+        reports.push(EmitReport {
+            sheet: "(port)".to_string(),
+            module: "port".to_string(),
+            path: ppath.to_string_lossy().replace('\\', "/"),
+            rows: sheets.iter().filter(|s| s.manifest.emit_port).count(),
+            bytes: src.len(),
+            written,
+        });
+    }
 
     Ok(reports)
 }

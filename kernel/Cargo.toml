@@ -1,0 +1,16 @@
+[package]
+name = "terraria-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The hand-written part of the Rust server, plus the generated port it consumes"
+publish = false
+
+[lib]
+name = "terraria_kernel"
+path = "lib.rs"
+
+[dependencies]
+
+[build-dependencies]
+sheetty = { path = "../crates/sheetty" }

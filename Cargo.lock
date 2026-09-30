@@ -19,3 +19,17 @@ version = "0.1.0"
 dependencies = [
  "sheetty",
 ]
+
+[[package]]
+name = "terraria-kernel"
+version = "0.1.0"
+dependencies = [
+ "sheetty",
+]
+
+[[package]]
+name = "terraria-server"
+version = "0.1.0"
+dependencies = [
+ "terraria-kernel",
+]

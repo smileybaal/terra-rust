@@ -16,6 +16,13 @@
 # `type` is this id, so the two agree by construction (dec018).
 # Type ids are dotted namespace paths, so the compound-key exception is declared.
 # emit: rust
+# emit_port: rust
+# port_from: re/server/fields,re/server/methods
+# `emit_port` asks the emitter for the whole Rust port, which is a JOIN of
+# this sheet with the ones named in port_from: a type row is a Rust item,
+# its field rows are the struct body, its method rows are the impl. A
+# single sheet cannot project a port, because the parts live in three
+# relations. Only the server is marked, so only the server is ported.
 # id_form: compound
 # key_alias: re/client/types,re/client/triage,re/server/fields,re/client/fields
 # A TYPE and a FIELD of its parent can fold to the same id, because ids
