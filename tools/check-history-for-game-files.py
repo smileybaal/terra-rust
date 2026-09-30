@@ -82,10 +82,28 @@ def main():
     print(f"  {n} files hashed")
 
     # ---- pass 1: content ------------------------------------------------
+    # Reachability matters and is not the same question as existence. `git add`
+    # writes a blob into the object database IMMEDIATELY, so a commit that the
+    # pre-commit guard then refuses still leaves the blob behind as an unreachable
+    # loose object. That object is not in any commit and is not sent by a push, but
+    # it is on disk until it is pruned, and the two cases deserve different answers
+    # rather than one alarming yes/no.
+    reachable = set()
+    for line in git("rev-list", "--objects", "--all").splitlines():
+        parts = line.split(" ", 1)
+        if parts and len(parts[0]) == 40:
+            reachable.add(parts[0])
+
     shared = sorted(set(game_by_blob) & blobs)
-    print(f"\n== BLOB: install files that exist as git objects: {len(shared)} ==")
-    for b in shared:
-        print(f"   {b}  {os.path.relpath(game_by_blob[b], install)}")
+    reach = [b for b in shared if b in reachable]
+    unreach = [b for b in shared if b not in reachable]
+    print(f"\n== BLOB: install files present as git objects: {len(shared)} ==")
+    print(f"   reachable from a ref (these WOULD be pushed): {len(reach)}")
+    for b in reach:
+        print(f"      {b}  {os.path.relpath(game_by_blob[b], install)}")
+    print(f"   unreachable leftovers in .git/objects (prune these): {len(unreach)}")
+    for b in unreach:
+        print(f"      {b}  {os.path.relpath(game_by_blob[b], install)}")
 
     # ---- pass 2: paths ever added ---------------------------------------
     print("\n== PATH: every path ever added in any commit ==")
@@ -125,8 +143,12 @@ def main():
     for b in biggest:
         print(f"   {objects[b][1]:>10} bytes  {b[:12]}  {where.get(b, '(no path)')}")
 
-    bad = len(shared) + len(path_hits) + len(ext_hits)
-    print("\nHISTORY CONTAINS GAME FILES:", "YES" if bad else "NO")
+    bad = len(reach) + len(path_hits) + len(ext_hits)
+    print("\nPUSHABLE GAME FILES (reachable from a ref):", len(reach))
+    if unreach:
+        print(f"unreachable leftovers, not pushable but present on disk: {len(unreach)}")
+        print("  clear them with: git gc --prune=now")
+    print("HISTORY CONTAINS GAME FILES:", "YES" if bad else "NO")
     print("problems:", bad)
     return 1 if bad else 0
 
