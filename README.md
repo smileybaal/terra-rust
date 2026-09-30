@@ -11,8 +11,9 @@ to decouple code volume from token cost: the agent authors *rows*, not code, and
 row projects mechanically to a strut.
 
 **Where it stands:** the evidence is complete and preflight-clean, and the server
-port **compiles** - 64,040 lines of Rust generated from 47,989 sheet rows. The
-generated bodies are stubs: this is the server's *shape*, not its behaviour. See
+port **compiles** - 126,315 lines of Rust across 5 emitted modules, projected
+from 46,989 rows of server evidence. The generated bodies are stubs: this is the
+server's *shape*, not its behaviour. See
 [Status](#status-what-is-and-is-not-done) before reading further.
 
 ## Mode
@@ -93,7 +94,7 @@ cargo run -p sheetty-cli -- pack v_server_types --rows 1..900   # ad-hoc row win
 
 cargo build -p terraria-server             # the Rust server: generated shape + hand-written kernel
 cargo run -p terraria-server -- -savedirectory C:\saves
-cargo test -p terraria-kernel              # 16 tests over the port and the kernel
+cargo test -p terraria-kernel              # 19 tests over the port and the kernel
 cargo test -p terraria-demo                # proves the emitted code compiles and is correct
 
 python tools\ps.py tools\test-preflight.ps1  # prove the rules actually fire
@@ -138,9 +139,9 @@ whole 125 MB assembly regardless of `-t`).
 | diagnostic coverage | 31 codes proven to fire by `tools/test-rules-sweep.ps1` against generated fixtures |
 | client evidence (ILSpy) | 2,464 types, 30,057 members, 14,517 methods, 3,602 edges |
 | server evidence (ILSpy) | 2,463 types, 30,040 members, 14,486 methods, 3,601 edges |
-| client vs server | 2,456 shared, 6 client-only, 5 server-only, 2 divergent |
-| Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders, 64,040 lines |
-| Rust kernel (hand-written) | `kernel/{lib,args,boot}.rs`, all listed in `kernel.tsv`; 16 tests |
+| client vs server | 2,458 shared, 6 client-only, 5 server-only, 2 divergent |
+| Rust port (generated) | **compiles**: 2,463 types, 30,040 members, 14,486 methods, 504 placeholders; 126,315 lines across 5 emitted modules |
+| Rust kernel (hand-written) | `kernel/{lib,args,boot}.rs`, all listed in `kernel.tsv`; 19 tests |
 | strings / assets | 21,081 strings; 15,135 asset refs, 15,123 verified on disk **with a real sha256 each** |
 | Ghidra | 18,300 CLI **symbol records**, 68,268 PE data types - and **0 decoded instructions** |
 
@@ -357,7 +358,7 @@ The doctrine this exercises, and how it was verified rather than asserted:
 | Doctrine | Verified by |
 |---|---|
 | D2 one row, one strut | `re/client/types.tsv` 2,464 rows -> 2,464 `Def` values; `by_id("terraria.player").fields == 1313` |
-| D5 emit gated on preflight | `sheetty emit --sheets tests/preflight-rules` refuses with 7 errors and writes nothing |
+| D5 emit gated on preflight | `sheetty emit --sheets tests/preflight-rules` refuses with 8 errors and writes nothing |
 | D6 banner, never committed | `E-L0-GENERATED` fires when a generated file is planted in the tree |
 | 5.9 one module per sheet | separate `plan.rs`, `re_client_types.rs`, `re_server_types.rs`, `registry.rs`, plus the multi-sheet `port.rs` |
 | 5.9 hash-gated writes | a second `emit` run reports `0 written, N unchanged` |
@@ -464,7 +465,7 @@ blob's name is `sha1("blob <len>\0" + bytes)` - so all 16,019 files of
 object the repository contains. Current result:
 
 ```
-221 blobs in the object database, 16,019 install files hashed
+229 blobs in the object database (as of this commit), 16,019 install files hashed
   install files that exist as git objects:  0
   paths ever added matching the install:    0
   paths ever added with a game extension:   0
