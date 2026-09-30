@@ -50,8 +50,18 @@ pub const CONNECT_STRING: &str = "Terraria326";
 
 /// `Lang.mp` keys. The client resolves them from its own localization, which is why a
 /// key travels instead of a sentence.
+///
+/// These are the one class of value in this module the sheets do NOT carry: searching
+/// every sheet for `LegacyMultiplayer` and for the CLI/Net keys finds only an unrelated
+/// UI class, and the server has no `strings` sheet at all (dec015). So they are cited
+/// from the localization table the game ships, and which key belongs where is cited
+/// from the C# line that passes it.
 mod mp {
+    /// `Lang.mp[1]`, passed at MessageBuffer.cs:160: "Incorrect password".
+    pub const INCORRECT_PASSWORD: &str = "LegacyMultiplayer.1";
+    /// `Lang.mp[2]`, passed at MessageBuffer.cs:167 and :171.
     pub const INVALID_STATE: &str = "LegacyMultiplayer.2";
+    /// `Lang.mp[4]`, passed at MessageBuffer.cs:218.
     pub const VERSION_MISMATCH: &str = "LegacyMultiplayer.4";
 }
 
@@ -79,11 +89,19 @@ static CONNECTED: AtomicUsize = AtomicUsize::new(0);
 // the wire: `BinaryWriter` strings and the 2-byte length prefix
 // ---------------------------------------------------------------------------
 
-/// `BinaryWriter.Write(string)`: a 7-bit encoded byte length, then UTF-8.
+/// The most a legitimate string can be, and the initial allocation cap.
 ///
-/// Get this wrong and nothing else in the protocol can be right, so it is written out
-/// rather than delegated to a crate: the format is a contract with a C# reader.
-fn read_string<R: Read>(r: &mut R) -> io::Result<String> {
+/// Two bounds, both derived rather than invented. A frame's length is a `u16`
+/// (`write_packet`), so no body and therefore no string inside one can exceed 65535
+/// bytes: a larger claim is not a big string, it is a lie. And the capacity the buffer
+/// starts at is `Netplay.NetBufferSize`, which is the buffer the C# gives each client
+/// (`Clients[i].ReadBuffer = new byte[1024]`, Netplay.cs:305) and a ROW in
+/// `sheets/re/server/fields.tsv` (`terraria.netplay.netbuffersize`).
+const MAX_STRING: usize = u16::MAX as usize;
+const STRING_CHUNK: usize = port::terraria::Netplay::NetBufferSize as usize;
+
+/// The 7-bit encoded length `BinaryWriter.Write(string)` puts in front of the bytes.
+fn read_7bit_len<R: Read>(r: &mut R) -> io::Result<usize> {
     let mut len = 0usize;
     let mut shift = 0u32;
     loop {
@@ -98,8 +116,33 @@ fn read_string<R: Read>(r: &mut R) -> io::Result<String> {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "7-bit length is too long"));
         }
     }
-    let mut buf = vec![0u8; len];
-    r.read_exact(&mut buf)?;
+    Ok(len)
+}
+
+/// `BinaryWriter.Write(string)`: a 7-bit encoded byte length, then UTF-8.
+///
+/// The claimed length is NOT trusted to size the buffer. A hostile client can send five
+/// bytes that claim ~34 GiB, and allocating that before one payload byte arrives is a
+/// resource vector the C# does not have: its `BinaryReader` reads from a buffer it
+/// already holds and grows its own string as it goes. So the claim is checked against
+/// the frame bound and the bytes are read in bounded chunks.
+fn read_string<R: Read>(r: &mut R) -> io::Result<String> {
+    let len = read_7bit_len(r)?;
+    if len > MAX_STRING {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("a string of {len} bytes cannot be inside a {MAX_STRING}-byte frame"),
+        ));
+    }
+    let mut buf = Vec::with_capacity(len.min(STRING_CHUNK));
+    let mut chunk = [0u8; 4096];
+    let mut remaining = len;
+    while remaining > 0 {
+        let take = remaining.min(chunk.len());
+        r.read_exact(&mut chunk[..take])?;
+        buf.extend_from_slice(&chunk[..take]);
+        remaining -= take;
+    }
     String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
@@ -124,7 +167,10 @@ fn write_string<W: Write>(w: &mut W, s: &str) -> io::Result<()> {
 /// byte, the key, then a zero substitution count. A kick that travels as a key lets
 /// the client localize it, which is why the C# never sends the sentence.
 fn write_kick_key<W: Write>(w: &mut W, key: &str) -> io::Result<()> {
-    w.write_all(&[2])?; // Mode.LocalizationKey
+    // The ordinal is the sheet's: `terraria.localization.networktext.mode`
+    // (LocalizationKey = 2), projected as `NetworkText::Mode`. Not typed here, so
+    // the mode byte and the enum cannot drift (D1/D6).
+    w.write_all(&[port::terraria::localization::networktext::Mode::LocalizationKey as u8])?;
     write_string(w, key)?;
     w.write_all(&[0])?; // no substitutions
     Ok(())
@@ -133,7 +179,7 @@ fn write_kick_key<W: Write>(w: &mut W, key: &str) -> io::Result<()> {
 /// `NetworkText.Serialize` with `Mode.Literal`. Used only for this port's own
 /// not-implemented notice, which is not a C# string and must not pretend to be one.
 fn write_kick_literal<W: Write>(w: &mut W, text: &str) -> io::Result<()> {
-    w.write_all(&[0])?; // Mode.Literal
+    w.write_all(&[port::terraria::localization::networktext::Mode::Literal as u8])?; // Mode.Literal
     write_string(w, text)?;
     Ok(())
 }
@@ -234,6 +280,14 @@ fn client_loop(mut stream: TcpStream, password: Option<String>) -> io::Result<()
             Err(e) => return Err(e),
         };
 
+        // MessageBuffer.cs:158-162, and this one runs BEFORE the two below it: once a
+        // password has been asked for, anything other than `SendPassword` is answered
+        // with the "Incorrect password" kick. Without it a client could sit at State -1
+        // and be told nothing, and a repeated Hello would be ignored rather than refused.
+        if state == -1 && id != port::terraria::id::MessageID::SendPassword {
+            return boot(&mut stream, mp::INCORRECT_PASSWORD, "not SendPassword while State == -1");
+        }
+
         // MessageBuffer.cs:169: before the handshake, only Hello is legal.
         if state == 0 && id != port::terraria::id::MessageID::Hello {
             return boot(&mut stream, mp::INVALID_STATE, "not Hello while State == 0");
@@ -321,6 +375,52 @@ mod tests {
         assert_eq!(CONNECT_STRING, format!("Terraria{PROTOCOL_VERSION}"));
     }
 
+    /// The kick's mode byte is `NetworkText.Mode`, which is a sheet row
+    /// (`terraria.localization.networktext.mode`: Literal = 0, LocalizationKey = 2)
+    /// projected as `port::terraria::localization::networktext::Mode`. The writers take
+    /// the ordinal from that projection instead of retyping 0 and 2, so a sheet that
+    /// moved the ordinal moves the wire byte with it (D1/D6). The two agree today,
+    /// which is why this is a coupling check and not a difference.
+    #[test]
+    fn kick_modes_come_from_the_projected_networktext_mode() {
+        use port::terraria::localization::networktext::Mode;
+        assert_eq!(Mode::Literal as u8, 0, "the sheet row networktext.mode.literal");
+        assert_eq!(Mode::LocalizationKey as u8, 2, "the sheet row networktext.mode.localizationkey");
+        let mut key = Vec::new();
+        write_kick_key(&mut key, "K").unwrap();
+        assert_eq!(key[0], Mode::LocalizationKey as u8);
+        let mut lit = Vec::new();
+        write_kick_literal(&mut lit, "L").unwrap();
+        assert_eq!(lit[0], Mode::Literal as u8);
+    }
+
+    /// A claimed length that cannot be legitimate is refused rather than believed.
+    ///
+    /// The frame's own `u16` length is the bound, so a five-byte claim of ~34 GiB is a
+    /// lie, and the old code answered it by asking the allocator for 34 GiB before a
+    /// single payload byte arrived. Measured against the running binary the virtual size
+    /// did not move, because the allocation is freed as soon as the read fails; the
+    /// waste is real all the same, and this is the test that pins the refusal.
+    #[test]
+    fn an_impossible_string_length_is_refused_not_allocated() {
+        // 7-bit 2^28 followed by one byte of payload: what a hostile client sends.
+        let claimed_256_mib = [0x80u8, 0x80, 0x80, 0x80, 0x01, b'T'];
+        let err = read_string(&mut Cursor::new(&claimed_256_mib[..])).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("cannot be inside"), "got {err}");
+
+        // 7-bit ~34 GiB, no payload at all.
+        let claimed_34_gib = [0xFFu8, 0xFF, 0xFF, 0xFF, 0x7F];
+        let err = read_string(&mut Cursor::new(&claimed_34_gib[..])).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        // The largest claim that could be real is still read, so the bound does not
+        // reject a legitimate value: a 65535-byte string inside a 65535-byte frame.
+        let mut wire = Vec::new();
+        write_string(&mut wire, &"x".repeat(MAX_STRING)).unwrap();
+        assert_eq!(read_string(&mut Cursor::new(&wire[..])).unwrap().len(), MAX_STRING);
+    }
+
     /// The 2-byte prefix excludes itself and covers the id, and a body long enough to
     /// need a two-byte 7-bit length round-trips. This is the framing the C# writes with
     /// `writer.BaseStream.Position += 2L` and then back-patches.
@@ -393,15 +493,23 @@ mod tests {
     }
 
     /// A password set means the C# goes to `State = -1` and asks, and this port does the
-    /// same rather than quietly letting the client in.
+    /// same rather than quietly letting the client in. It also means MessageBuffer.cs:158
+    /// now applies: anything but `SendPassword` is refused with the password key.
     #[test]
-    fn a_password_is_requested_before_player_info() {
+    fn a_password_is_requested_and_then_anything_else_is_refused() {
         let addr = start(Some("hunter2".to_string()));
         let mut c = connect(addr);
         send_hello(&mut c, CONNECT_STRING);
         let (id, body) = read_packet(&mut c).unwrap();
         assert_eq!(id, port::terraria::id::MessageID::RequestPassword);
         assert!(body.is_empty(), "SendData has no case 37, so nothing follows the id");
+
+        // A second Hello while State == -1 is not ignored: it is the "Incorrect
+        // password" kick, which is what the C# does at MessageBuffer.cs:160.
+        send_hello(&mut c, CONNECT_STRING);
+        let (id, body) = read_packet(&mut c).unwrap();
+        assert_eq!(id, port::terraria::id::MessageID::Kick);
+        assert_eq!(read_string(&mut Crsr::new(&body[1..])).unwrap(), mp::INCORRECT_PASSWORD);
     }
 
     // -- helpers ------------------------------------------------------------

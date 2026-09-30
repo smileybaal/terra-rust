@@ -143,8 +143,12 @@ def main():
         return total
 
     def kernel_tests():
+        # Recursive on purpose: `cargo test -p terraria-kernel` runs the crate's
+        # integration tests under kernel/tests/ as well as the inline ones, so a figure
+        # claiming to be the kernel's test count has to include them. Globbing
+        # `kernel/*.rs` missed 16 of them, which is how the scope error was found.
         n = 0
-        for f in sorted(glob.glob(os.path.join(ROOT, "kernel", "*.rs"))):
+        for f in sorted(glob.glob(os.path.join(ROOT, "kernel", "**", "*.rs"), recursive=True)):
             n += read(f).count("#[test]")
         return n
 

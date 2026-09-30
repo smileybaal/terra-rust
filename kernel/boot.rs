@@ -182,10 +182,14 @@ pub fn run(argv: &[String]) -> i32 {
     println!("  rather than left hanging (kernel/net.rs).");
     println!();
 
-    // `LaunchInitializer.LoadSharedParameters` reads the port from `-p` / `-port`
-    // (LaunchInitializer.cs:30); `-pass` / `-password` sets `Netplay.ServerPassword`
-    // (LaunchInitializer.cs:44).
-    let listen_port = match params.get("-port").or_else(|| params.get("-p")) {
+    // `LaunchInitializer.LoadSharedParameters` reads the port from
+    // `TryParameter("-p", "-port")` (LaunchInitializer.cs:30) and
+    // `LoadServerParameters` the password from `TryParameter("-pass", "-password")`
+    // (LaunchInitializer.cs:44). `TryParameter` returns the value of the FIRST key it
+    // finds, so the SHORT flag is consulted first and wins when both are given; reading
+    // `-port` before `-p` (or `-password` before `-pass`) would silently pick the other
+    // value the C# would have used.
+    let listen_port = match params.get("-p").or_else(|| params.get("-port")) {
         Some(v) => match v.trim().parse::<u16>() {
             Ok(p) => p,
             Err(_) => {
@@ -196,8 +200,8 @@ pub fn run(argv: &[String]) -> i32 {
         None => port::terraria::Netplay::DefaultPort as u16,
     };
     let password = params
-        .get("-password")
-        .or_else(|| params.get("-pass"))
+        .get("-pass")
+        .or_else(|| params.get("-password"))
         .map(str::to_string)
         .filter(|p| !p.is_empty());
 
@@ -209,7 +213,14 @@ pub fn run(argv: &[String]) -> i32 {
             return 1;
         }
     };
-    println!("listening on 0.0.0.0:{listen_port}");
+    // Report the address the socket REALLY bound, not the one that was requested: with
+    // `-port 0` the OS picks an ephemeral port, and `0` would leave the operator with no
+    // way to learn where to connect. `local_addr()` is the only honest source.
+    let bound = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| format!("0.0.0.0:{listen_port}"));
+    println!("listening on {bound}");
     match crate::net::serve(listener, password) {
         Ok(()) => 0,
         Err(e) => {
