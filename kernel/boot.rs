@@ -177,9 +177,10 @@ pub fn run(argv: &[String]) -> i32 {
     // what is not is everything after it, and the module says which message is missing
     // on every kick rather than leaving a client to wait for one that will not come.
     println!("serving: the entry path is implemented (accept, framing, Hello handshake).");
-    println!("  after the handshake this build has nothing: world loading, tile sending");
-    println!("  and the game loop are not written, so such a client is kicked by name");
-    println!("  rather than left hanging (kernel/net.rs).");
+    println!("  after the handshake this build has nothing: a client that asks for the world");
+    println!("  is kicked by name rather than left hanging (kernel/net.rs).");
+    println!("  A world FILE can be read (kernel/worldfile.rs, kernel/tiles.rs), but nothing");
+    println!("  sends one yet - so 'world loading' means reading a .wld here, not serving it.");
     println!();
 
     // `LaunchInitializer.LoadSharedParameters` reads the port from

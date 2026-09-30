@@ -213,9 +213,10 @@ the port knows:
   inventory rows               2463
 
 serving: the entry path is implemented (accept, framing, Hello handshake).
-  after the handshake this build has nothing: world loading, tile sending
-  and the game loop are not written, so such a client is kicked by name
-  rather than left hanging (kernel/net.rs).
+  after the handshake this build has nothing: a client that asks for the world
+  is kicked by name rather than left hanging (kernel/net.rs).
+  A world FILE can be read (kernel/worldfile.rs, kernel/tiles.rs), but nothing
+  sends one yet - so 'world loading' means reading a .wld here, not serving it.
 
 listening on 0.0.0.0:7777
 Server started
@@ -267,8 +268,14 @@ Not done, and not pretended otherwise:
 
 - **The port has almost no behaviour.** All 14,486 generated method bodies are
   stubs, and the kernel implements the entry path only: accept, framing, `Hello`.
-  Everything after the handshake - world loading, tile sending, the game loop - is
-  not written, so a client that reaches it is kicked by name instead of served.
+  Everything after the handshake - serving the world, tile sending, the game loop -
+  is not written, so a client that reaches it is kicked by name instead of served.
+- **A world can be read, but not served.** `-world <path>` loads a real `.wld` and
+  reports it, and the container, the header and the tile section are checked
+  byte-exactly against two real worlds of different file versions. Nine of the
+  eleven sections are still unread (`chests`, `signs`, `NPCs`, `tile entities`,
+  `weighted pressure plates`, `town manager`, `bestiary`, `creative powers`,
+  `footer`), and the report names them rather than printing only its successes.
 - **Ghidra analysed the client only.** The server has no `functions`, `strings` or
   `types_pe` sheets (dec015, t0007), so nothing in this repository says what
   `TerrariaServer.exe`'s native surface looks like.
