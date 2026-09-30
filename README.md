@@ -451,3 +451,65 @@ live in `re/binaries/` and `re/exports/`, both gitignored.
 
 `Terraria` is a trademark of Re-Logic. The binary is used as an analysis subject
 only, and no game code or asset is redistributed here.
+
+### This is checked, not asserted
+
+Two tools, both runnable on demand, both exiting non-zero when the claim fails.
+
+`tools/check-history-for-game-files.py` answers the question that actually matters
+for a push, which is *history*, not the working tree: a file committed once and
+deleted later still ships. It compares by content rather than by filename - a git
+blob's name is `sha1("blob <len>\0" + bytes)` - so all 16,019 files of
+`C:\Steam\steamapps\common\Terraria` are hashed that way and intersected with every
+object the repository contains. Current result:
+
+```
+221 blobs in the object database, 16,019 install files hashed
+  install files that exist as git objects:  0
+  paths ever added matching the install:    0
+  paths ever added with a game extension:   0
+HISTORY CONTAINS GAME FILES: NO
+```
+
+The largest blob in the whole history is 8.2 MB and it is
+`sheets/re/server/fields.tsv` - a sheet this book generated. Nothing in the pack is
+game-shaped.
+
+`tools/find-game-file-copies.py` does the same for the working tree and then checks
+that every match is *neutralised*: tracked (a failure, it must leave the index) or
+untracked and not ignored (also a failure, it is one `git add -A` away). Exactly two
+files match - `re/binaries/Terraria.exe` and `TerrariaServer.exe` - and both are
+ignored, so none can be committed.
+
+### And it cannot become untrue
+
+`.githooks/pre-commit` runs the guard before every commit:
+
+```
+git config core.hooksPath .githooks
+```
+
+It hashes only the files being committed (the install's blob names are cached in
+`.git/`, which is never committed), and it refuses with the reason:
+
+```
+REFUSED: this commit would add a file from the Terraria install.
+  zz_leak_probe.bin: the CONTENT is identical to a file in the install
+```
+
+That message is from a real test: a game file was copied in under a name the
+install does not use, so the name and extension checks could not see it, and the
+content check refused the commit anyway.
+
+### What IS in here, plainly
+
+The repository contains no original game file and no asset bytes. It does contain
+material *derived* from the binaries, and the distinction is worth stating rather
+than blurring: `re/client/strings.tsv` holds 21,081 strings recovered from the
+executable, `re/*/functions.tsv` holds symbol names, `re/client/types_pe.tsv` holds
+68,268 metadata type names, and the `fields` sheets hold constant *values* (which is
+why `ItemID::DirtBlock == 2` compiles). Those are rows describing the binary, not
+copies of it, and they are the evidence the whole method is built on. If you would
+not publish extracted string tables and decompiled type structure, then this
+repository is not publishable either - but no file in it is a game file.
+

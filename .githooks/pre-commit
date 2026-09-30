@@ -1,0 +1,12 @@
+#!/bin/sh
+# Refuse a commit that would add a file from the Terraria install.
+#
+# Installed by:  git config core.hooksPath .githooks
+# The logic lives in tools/guard-no-game-files.py so it can also be run by hand,
+# and so the hook itself stays a one-liner that cannot drift from it.
+#
+# This is the enforcement half of the Legal section: the scans prove the history is
+# clean, this is what stops it becoming unclean at 2am.
+
+root="$(git rev-parse --show-toplevel)"
+exec python "$root/tools/guard-no-game-files.py" --staged
