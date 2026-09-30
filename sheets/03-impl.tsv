@@ -24,9 +24,9 @@ player	domain/player	-	todo	-	-	-	-
 crafting	domain/recipe	-	todo	-	-	-	-
 combat	domain/damage	-	todo	-	-	-	-
 net	domain/net	-	todo	-	-	-	must handle a per-platform field set: terraria.netplay has 29 fields in the client and 31 in the server (dec017)
-render	domain/render	-	todo	-	-	-	-
-audio	domain/audio	-	todo	-	-	-	-
-ui	domain/ui	-	todo	-	-	-	-
+render	domain/render	-	n/a	-	-	-	-
+audio	domain/audio	-	n/a	-	-	-	-
+ui	domain/ui	-	n/a	-	-	-	-
 assets	domain/assets	-	todo	-	-	-	-
 time_weather	domain/time	-	todo	-	-	-	-
 world_event	domain/event	-	todo	-	-	-	-

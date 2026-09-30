@@ -176,11 +176,22 @@ mod tests {
     }
 
     /// The plan is the specification relation, and status comes from the sheet.
+    ///
+    /// The priority is the WORKLOAD rank, so it moved when the rank was measured
+    /// rather than guessed (dec021): `core_math` is the dependency of everything
+    /// above it and is therefore ranked last of the units a server actually runs.
+    /// This test failing on that change is the point of it - the value is read
+    /// from `sheets/02-plan.tsv`, not from the code under test.
     #[test]
     fn plan_status_comes_from_the_sheet() {
         let core = plan::by_id("core_math").expect("core_math must exist");
         assert_eq!(core.status, "todo");
-        assert_eq!(core.priority, 1);
+        assert_eq!(core.priority, 13, "the measured workload rank");
         assert_eq!(core.target, "crate::core::math");
+        // A unit the dedicated server never executes says so, and that is a sheet
+        // value like any other.
+        let render = plan::by_id("render").expect("render must exist");
+        assert_eq!(render.status, "n/a");
+        assert_eq!(render.priority, 99);
     }
 }

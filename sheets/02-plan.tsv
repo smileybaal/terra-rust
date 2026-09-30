@@ -1,26 +1,44 @@
 # sheet: 02-plan
 # version: 1
 # generator: plan
-# target: crates/terraria
+# target: kernel
 # index: by_id
 # requires: -
 # owned_by: architect
 # doctrine: D1,D2,D4
 # emit: rust
+# The subsystems of the SERVER, and where each one's behaviour lives.
+#
+# `target` is a path in the `kernel` crate, which is where hand-written behaviour
+# goes (D4): the sheets project the server's SHAPE into `port`, and the kernel
+# implements what that shape does. The manifest's target was `crates/terraria`, a
+# crate that was never created; the per-row targets were already correct for the
+# kernel as written, so only the manifest was wrong (dec021).
+#
+# `priority` is the workload rank, and where it is measured it says so in `notes`:
+# it is the triage score of the type the unit covers, and 1 is the heaviest. Only
+# the five units whose type mapping is unambiguous are ranked from measurement; the
+# rest keep their earlier relative order and say that they are unmeasured rather
+# than pretending to a number.
+#
+# `status` is todo | n/a. `n/a` marks a unit the dedicated server never executes:
+# the server assembly contains the code, but a headless server draws no sprite,
+# plays no sound and opens no menu, so implementing them would be structure for a
+# program that does not exist (dec021).
 id:string*	kind:string	sheet:string	target:string	priority:u8	status:string	notes:string?
-core_math	subsystem	domain/core	crate::core::math	1	todo	Vector2/Rectangle/Utils ports
-world_tiles	subsystem	domain/world	crate::world::tiles	1	todo	tile grid, framing, liquid, wiring
-world_gen	subsystem	domain/world	crate::world::gen	2	todo	terrain, biomes, structures, chests
-npc	subsystem	domain/npc	crate::entities::npc	1	todo	NPC definitions + AI states
-item	subsystem	domain/item	crate::entities::item	1	todo	item definitions + use behaviour
-projectile	subsystem	domain/projectile	crate::entities::projectile	1	todo	projectiles + AI
-player	subsystem	domain/player	crate::player	1	todo	stats, inventory, movement, buffs
-crafting	subsystem	domain/recipe	crate::systems::crafting	2	todo	recipe graph, stations (sheet-driven)
-combat	subsystem	domain/damage	crate::systems::combat	2	todo	damage classes, knockback, immunities
-net	subsystem	domain/net	crate::net	3	todo	multiplayer message protocol
-render	subsystem	domain/render	crate::render	3	todo	tile/sprite draw, lighting, particles
-audio	subsystem	domain/audio	crate::audio	3	todo	music and sfx id tables
-ui	subsystem	domain/ui	crate::ui	3	todo	inventory, menus, chat tags
-assets	subsystem	domain/assets	crate::assets	2	todo	.xnb content pipeline
-time_weather	subsystem	domain/time	crate::world::time	3	todo	day/night, moon phase, events
-world_event	subsystem	domain/event	crate::world::event	3	todo	blood moon, solar eclipse, invasions
+player	subsystem	domain/player	crate::player	1	todo	workload 49.87 measured (terraria.player); stats, inventory, movement, buffs
+world_gen	subsystem	domain/world	crate::world::gen	2	todo	workload 43.57 measured (terraria.worldgen); terrain, biomes, structures, chests
+npc	subsystem	domain/npc	crate::entities::npc	3	todo	workload 42.82 measured (terraria.npc); definitions + AI states
+projectile	subsystem	domain/projectile	crate::entities::projectile	4	todo	workload 39.40 measured (terraria.projectile); projectiles + AI
+item	subsystem	domain/item	crate::entities::item	5	todo	workload 35.12 measured (terraria.item); definitions + use behaviour
+world_tiles	subsystem	domain/world	crate::world::tiles	6	todo	tile grid, framing, liquid, wiring; rank unmeasured
+crafting	subsystem	domain/recipe	crate::systems::crafting	7	todo	recipe graph, stations (sheet-driven); rank unmeasured
+combat	subsystem	domain/damage	crate::systems::combat	8	todo	damage classes, knockback, immunities; rank unmeasured
+net	subsystem	domain/net	crate::net	9	todo	multiplayer message protocol; rank unmeasured, but the entry path is written
+time_weather	subsystem	domain/time	crate::world::time	10	todo	day/night, moon phase, weather; the server syncs these, so it is real work
+world_event	subsystem	domain/event	crate::world::event	11	todo	blood moon, solar eclipse, invasions; runs server-side
+assets	subsystem	domain/assets	crate::assets	12	todo	.xnb content pipeline; a headless server is believed to skip content loading, but that is unverified so it stays todo
+core_math	subsystem	domain/core	crate::core::math	13	todo	Vector2/Rectangle/Utils ports; a dependency of everything above
+render	subsystem	domain/render	crate::render	99	n/a	a dedicated server draws nothing; the code exists in the assembly and never runs
+audio	subsystem	domain/audio	crate::audio	99	n/a	a dedicated server plays nothing; the code exists in the assembly and never runs
+ui	subsystem	domain/ui	crate::ui	99	n/a	a dedicated server opens no menu; its interface is the console, which is CLI strings, not UI

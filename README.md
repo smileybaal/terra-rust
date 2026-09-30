@@ -111,11 +111,26 @@ python tools\mitm.py --listen 127.0.0.1:1739 --target 127.0.0.1:7777   # log eve
 mistaken for "the whole MDD checklist passed". An absent rule is not a passing one:
 
 ```
-PREFLIGHT  sheets/  25 sheets, 229380 rows, 234 columns
+PREFLIGHT  sheets/  25 sheets, 229381 rows, 234 columns
   emitter 0.1.0
   rule coverage  29/30 MDD checks exist (implemented 22, partial 6, unexercised 1, absent 1)
   (run `sheetty rules` for the per-check status; an absent rule is not a passing one)
+
+  L0 structural ................ ok
+  L1 types ................ ok
+  L2 refs ................ ok
+
+  L3 overlap 02-plan x 03-impl
+      covered 16  unimplemented 0  orphan 0  divergent 0
+      not done    13  core_math, world_tiles, world_gen, npc, item, projectile, player, crafting, combat, net ... (+3)
+OK  0 warnings
 ```
+
+The `not done` line exists because `unimplemented` above is measured by key
+presence, not by status: a unit that is `todo` and names no `rust_item` counts as
+`covered`. Without it, "16 covered" printed identically whether sixteen subsystems
+were finished or none had been started, so the number could not say what to write
+next. It is a report rather than a finding, so it never gates a build.
 
 ## Reproduce the evidence
 
@@ -136,9 +151,9 @@ whole 125 MB assembly regardless of `-t`).
 |---|---|
 | targets | `Terraria.exe` (client) `960a03bf...`; `TerrariaServer.exe` (server) `328872c6...`; both PE32 i386 .NET CLI assemblies |
 | sheets | 25 |
-| rows | 229,380 |
+| rows | 229,381 |
 | columns | 234 |
-| preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan |
+| preflight | 0 errors, 0 warnings; L3 = 16 covered / 0 unimplemented / 0 orphan, and **13 of those 16 units not done** (the other 3 are `n/a`: a dedicated server never draws, plays a sound or opens a menu) |
 | preflight rule coverage | **29 of 30** MDD checks exist (22 implemented, 6 partial, 1 unexercised, 1 absent) - run `sheetty rules` |
 | diagnostic coverage | 31 codes proven to fire by `tools/test-rules-sweep.ps1` against generated fixtures |
 | client evidence (ILSpy) | 2,464 types, 30,057 members, 14,517 methods, 3,602 edges |

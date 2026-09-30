@@ -1650,6 +1650,40 @@ pub fn human_report(sheets: &[Sheet], findings: &[Finding], overlaps: &[Overlap]
             let head: Vec<&str> = o.unimplemented.iter().take(10).map(|s| s.as_str()).collect();
             let _ = writeln!(out, "      unimplemented: {}{}", head.join(", "), if u > head.len() { format!(" ... (+{})", u - head.len()) } else { String::new() });
         }
+        // What the impl relation CLAIMS, as opposed to what it lists.
+        //
+        // `overlap` classifies by key presence: a unit present in both sheets is
+        // `covered` even when its status is `todo` and it names no rust_item. So
+        // "covered 16, unimplemented 0" printed identically whether sixteen units
+        // were finished or none had been started, which makes the number useless
+        // for deciding what to write next. This line reads the claim instead: a
+        // unit is not done unless its status says `done` or `verified` AND it
+        // names an item, and `n/a` is a status that says the server never runs it
+        // (dec021). It is a report, not a finding, so it never gates a build.
+        if let Some(imp) = sheets.iter().find(|s| s.name == o.imp) {
+            let mut not_done: Vec<String> = Vec::new();
+            for r in &imp.rows {
+                let status = imp.cell(r, "status").unwrap_or("");
+                let item = imp.cell(r, "rust_item").unwrap_or("-");
+                let claimed = matches!(status, "done" | "verified") && item != "-";
+                if !claimed && status != "n/a" {
+                    not_done.push(imp.row_key(r));
+                }
+            }
+            if !not_done.is_empty() {
+                let head: Vec<&str> = not_done.iter().take(10).map(|s| s.as_str()).collect();
+                let _ = writeln!(
+                    out,
+                    "      not done    {}{}",
+                    not_done.len(),
+                    if not_done.len() > head.len() {
+                        format!("  {} ... (+{})", head.join(", "), not_done.len() - head.len())
+                    } else {
+                        format!("  {}", head.join(", "))
+                    }
+                );
+            }
+        }
         if !o.orphan.is_empty() {
             let head: Vec<&str> = o.orphan.iter().take(10).map(|s| s.as_str()).collect();
             let _ = writeln!(out, "      orphan: {}{}", head.join(", "), if or > head.len() { format!(" ... (+{})", or - head.len()) } else { String::new() });
