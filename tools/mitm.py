@@ -19,6 +19,12 @@ table is the same one the Rust port projects, so the proxy and the server cannot
 disagree about what message 4 is called. A body the proxy does not know is printed
 as hex rather than guessed at.
 
+That rule earned itself immediately. This file first labelled body 4 as a
+connection `State`, which was WRONG: the book says 4 is `SyncPlayer`, and
+`Netplay.Connection.State` is a separate client-side machine with values 0-6. The
+name now comes from the book, and only the field split is hand-written, each one
+citing the C# that reads it.
+
 Note on the server browser: Terraria finds servers by a UDP broadcast to
 255.255.255.255:8888 once a second (`Netplay.cs:826-874`), which this proxy does
 not relay. That is fine for a client you add by IP, which is the usual case when
