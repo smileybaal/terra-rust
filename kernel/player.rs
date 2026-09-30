@@ -9,6 +9,8 @@
 //! sent, and the generated `Player` struct would hold it happily, because a
 //! projected shape has no opinions - the clamps are behaviour, so they live here.
 
+use std::io::{self, Write};
+
 use crate::port::terraria::id::PlayerVariantID;
 
 /// The highest valid skin variant.
@@ -213,6 +215,138 @@ pub fn check_mana(stat_mana: i32, amount: i32, mana_cost_ratio: f32, pay: bool) 
         // Not affordable: the C# returns before deducting, so `pay` changes nothing.
         (false, stat_mana)
     }
+}
+
+/// `NetMessage.cs:1905` `WriteAccessoryVisibility`: bit i of a ushort, little-endian.
+///
+/// The C# shifts into a `ushort`, so an index at or beyond 16 contributes nothing -
+/// the bits are gone before the write. The array the game passes holds roughly
+/// fourteen flags, so the only indices that matter are the low ones; the guard records
+/// the behaviour instead of relying on Rust's shift overflowing in a debug build.
+pub fn accessory_visibility(hide_visible_accessory: &[bool]) -> u16 {
+    let mut bits = 0u16;
+    for (i, hidden) in hide_visible_accessory.iter().enumerate() {
+        if *hidden && i < 16 {
+            bits |= 1 << i;
+        }
+    }
+    bits
+}
+
+/// `NetMessage.cs:179-190`: the difficulty bits, including the gap at bit 2.
+///
+/// Normal (0) sets nothing at all; Expert (1) is bit 0; Master (2) is bit 1; and
+/// Journey (3) is **bit 3, not bit 2**, because bit 2 carries `extraAccessory`. Packing
+/// Journey as bit 2 would silently turn a Journey player into an Expert one with an
+/// extra accessory slot.
+pub fn difficulty_bits(difficulty: i32, extra_accessory: bool) -> u8 {
+    let mut bits = 0u8;
+    match difficulty {
+        1 => bits |= 1 << 0,
+        2 => bits |= 1 << 1,
+        3 => bits |= 1 << 3,
+        _ => {}
+    }
+    if extra_accessory {
+        bits |= 1 << 2;
+    }
+    bits
+}
+
+/// The fields `SyncPlayer` (4) puts on the wire (`NetMessage.cs:156-206`).
+///
+/// A plain input struct rather than the projected `Player`: that type has 1,313 fields
+/// and cannot be built in a test, and the message carries only these, so reaching for
+/// anything else would mean reading state the message does not have.
+#[derive(Debug, Clone, Copy)]
+pub struct SyncPlayer<'a> {
+    pub slot: u8,
+    pub skin_variant: i32,
+    pub voice_variant: i32,
+    pub voice_pitch_offset: f32,
+    pub haircut: i32,
+    pub name: &'a str,
+    pub hair_dye: &'a str,
+    pub hide_visible_accessory: &'a [bool],
+    pub hide_misc: u8,
+    /// hair, skin, eye, shirt, underShirt, pants, shoe - in that order.
+    pub colors: [(u8, u8, u8); 7],
+    pub difficulty: i32,
+    pub extra_accessory: bool,
+    pub using_biome_torches: bool,
+    pub happy_fun_torch_time: bool,
+    pub unlocked_biome_torches: bool,
+    pub unlocked_super_cart: bool,
+    pub enabled_super_cart: bool,
+    pub used_aegis_crystal: bool,
+    pub used_aegis_fruit: bool,
+    pub used_arcane_crystal: bool,
+    pub used_galaxy_pearl: bool,
+    pub used_gummy_worm: bool,
+    pub used_ambrosia: bool,
+    pub ate_artisan_bread: bool,
+}
+
+/// Write the body of `SyncPlayer` (4). The caller frames it with the id and length.
+///
+/// Field order is the C#'s, and every packed byte is a `BitsByte`, which is ONE byte
+/// with bit i holding the flag the C# names at index i. The colours go through
+/// `Utils.WriteRGB` (`Utils.cs:1414`), which writes R, G then B as three bytes.
+pub fn write_sync_player<W: Write>(w: &mut W, p: &SyncPlayer<'_>) -> io::Result<()> {
+    w.write_all(&[p.slot, p.skin_variant as u8, p.voice_variant as u8])?;
+    w.write_all(&p.voice_pitch_offset.to_le_bytes())?;
+    w.write_all(&[p.haircut as u8])?;
+    crate::net::write_string(w, p.name)?;
+    crate::net::write_string(w, p.hair_dye)?;
+    w.write_all(&accessory_visibility(p.hide_visible_accessory).to_le_bytes())?;
+    w.write_all(&[p.hide_misc])?;
+    for (r, g, b) in p.colors {
+        w.write_all(&[r, g, b])?;
+    }
+    w.write_all(&[difficulty_bits(p.difficulty, p.extra_accessory)])?;
+
+    let mut biome = 0u8;
+    if p.using_biome_torches {
+        biome |= 1 << 0;
+    }
+    if p.happy_fun_torch_time {
+        biome |= 1 << 1;
+    }
+    if p.unlocked_biome_torches {
+        biome |= 1 << 2;
+    }
+    if p.unlocked_super_cart {
+        biome |= 1 << 3;
+    }
+    if p.enabled_super_cart {
+        biome |= 1 << 4;
+    }
+    w.write_all(&[biome])?;
+
+    let mut crystal = 0u8;
+    if p.used_aegis_crystal {
+        crystal |= 1 << 0;
+    }
+    if p.used_aegis_fruit {
+        crystal |= 1 << 1;
+    }
+    if p.used_arcane_crystal {
+        crystal |= 1 << 2;
+    }
+    if p.used_galaxy_pearl {
+        crystal |= 1 << 3;
+    }
+    if p.used_gummy_worm {
+        crystal |= 1 << 4;
+    }
+    if p.used_ambrosia {
+        crystal |= 1 << 5;
+    }
+    if p.ate_artisan_bread {
+        crystal |= 1 << 6;
+    }
+    w.write_all(&[crystal])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -428,5 +562,103 @@ mod tests {
         assert_eq!(check_mana(0, 10, 1.0, false), (false, 0));
         // A free spell is always affordable, at any mana.
         assert_eq!(check_mana(0, 50, 0.0, true), (true, 0));
+    }
+
+    /// A plain player, so the golden bytes below are readable.
+    fn sample() -> SyncPlayer<'static> {
+        SyncPlayer {
+            slot: 0,
+            skin_variant: 11,
+            voice_variant: 2,
+            voice_pitch_offset: 0.5,
+            haircut: 3,
+            name: "Bob",
+            hair_dye: "",
+            hide_visible_accessory: &[true, false, false, true],
+            hide_misc: 0,
+            colors: [
+                (1, 2, 3),
+                (4, 5, 6),
+                (7, 8, 9),
+                (10, 11, 12),
+                (13, 14, 15),
+                (16, 17, 18),
+                (19, 20, 21),
+            ],
+            difficulty: 3,
+            extra_accessory: true,
+            using_biome_torches: true,
+            happy_fun_torch_time: false,
+            unlocked_biome_torches: true,
+            unlocked_super_cart: false,
+            enabled_super_cart: true,
+            used_aegis_crystal: true,
+            used_aegis_fruit: false,
+            used_arcane_crystal: false,
+            used_galaxy_pearl: false,
+            used_gummy_worm: false,
+            used_ambrosia: false,
+            ate_artisan_bread: true,
+        }
+    }
+
+    /// The strongest test available without a client: the exact bytes.
+    #[test]
+    fn sync_player_writes_the_c_sharp_layout() {
+        let mut out = Vec::new();
+        write_sync_player(&mut out, &sample()).unwrap();
+        #[rustfmt::skip]
+        let expected: Vec<u8> = vec![
+            0,                                  // slot
+            11,                                 // skinVariant
+            2,                                  // voiceVariant
+            0x00, 0x00, 0x00, 0x3F,             // voicePitchOffset 0.5f, little-endian
+            3,                                  // hair
+            3, b'B', b'o', b'b',                // name: 7-bit length, then UTF-8
+            0,                                  // hairDye: empty string
+            0x09, 0x00,                         // accessory visibility: bits 0 and 3
+            0,                                  // hideMisc
+            1, 2, 3,                            // hairColor
+            4, 5, 6,                            // skinColor
+            7, 8, 9,                            // eyeColor
+            10, 11, 12,                         // shirtColor
+            13, 14, 15,                         // underShirtColor
+            16, 17, 18,                         // pantsColor
+            19, 20, 21,                         // shoeColor
+            0x0C,                               // difficulty: Journey = bit 3, plus extraAccessory bit 2
+            0x15,                               // biome torches: bits 0, 2 and 4
+            0x41,                               // crystals: AegisCrystal bit 0, ArtisanBread bit 6
+        ];
+        assert_eq!(out, expected);
+        assert_eq!(out.len(), 3 + 4 + 1 + 4 + 1 + 2 + 1 + 21 + 3);
+    }
+
+    /// Journey is bit 3, not bit 2, and Normal sets nothing.
+    #[test]
+    fn difficulty_bits_leave_the_gap_at_bit_two() {
+        assert_eq!(difficulty_bits(0, false), 0b0000_0000, "Normal is all zeros");
+        assert_eq!(difficulty_bits(1, false), 0b0000_0001);
+        assert_eq!(difficulty_bits(2, false), 0b0000_0010);
+        assert_eq!(difficulty_bits(3, false), 0b0000_1000, "Journey is bit 3");
+        assert_eq!(difficulty_bits(0, true), 0b0000_0100, "bit 2 is extraAccessory");
+        assert_eq!(difficulty_bits(3, true), 0b0000_1100);
+        // An unknown difficulty sets no difficulty bit but still reports the slot.
+        assert_eq!(difficulty_bits(99, true), 0b0000_0100);
+    }
+
+    /// The visibility field is one bit per index, little-endian on the wire.
+    #[test]
+    fn accessory_visibility_packs_one_bit_per_index() {
+        assert_eq!(accessory_visibility(&[]), 0);
+        assert_eq!(accessory_visibility(&[false; 14]), 0);
+        assert_eq!(accessory_visibility(&[true]), 1);
+        assert_eq!(accessory_visibility(&[false, true]), 2);
+        let all: Vec<bool> = vec![true; 16];
+        assert_eq!(accessory_visibility(&all), u16::MAX);
+        // At or beyond 16 the C# has already lost the bit into a ushort.
+        let mut long = vec![false; 20];
+        long[16] = true;
+        long[19] = true;
+        assert_eq!(accessory_visibility(&long), 0, "indices past 15 contribute nothing");
     }
 }

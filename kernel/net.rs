@@ -158,7 +158,7 @@ fn read_string<R: Read>(r: &mut R) -> io::Result<String> {
 }
 
 /// The write half of `read_string`.
-fn write_string<W: Write>(w: &mut W, s: &str) -> io::Result<()> {
+pub(crate) fn write_string<W: Write>(w: &mut W, s: &str) -> io::Result<()> {
     let mut len = s.len();
     loop {
         let mut byte = (len & 0x7F) as u8;
