@@ -215,6 +215,26 @@ pub fn run(argv: &[String]) -> i32 {
         .map(str::to_string)
         .filter(|p| !p.is_empty());
 
+    // `-world <path>` (`LaunchInitializer.cs:173`): the C# makes the path the active
+    // world and the server loads it. This port can read one, so it does, and reports what
+    // it found - INCLUDING the sections of the file it does not decode yet, because
+    // "loaded your world" would otherwise be a half-truth.
+    if let Some(path) = params.get("-world") {
+        match std::fs::read(path) {
+            Ok(data) => match crate::worldfile::load_world(&data) {
+                Ok(world) => report_world(path, &world),
+                Err(e) => {
+                    eprintln!("-world {path:?} is not a world this port can read: {e:?}");
+                    return 1;
+                }
+            },
+            Err(e) => {
+                eprintln!("-world {path:?} could not be opened: {e}");
+                return 1;
+            }
+        }
+    }
+
     let listener = match crate::net::bind(listen_port) {
         Ok(l) => l,
         Err(e) => {
@@ -237,6 +257,56 @@ pub fn run(argv: &[String]) -> i32 {
             eprintln!("server loop stopped: {e}");
             1
         }
+    }
+}
+
+/// Report a world, and say which of its sections are not read yet.
+///
+/// The undecoded list is the point: the reader handles two sections of eleven, and a
+/// report that printed only what it understood would let an operator believe the world
+/// is fully loaded. The slope count is marked as an upper bound for the same reason - the
+/// runtime `SaveSlopes` table is not in the book, so shapes are recorded permissively.
+fn report_world(path: &str, w: &crate::worldfile::LoadedWorld) {
+    let h = &w.header;
+    let t = &w.tile_stats;
+    println!("world {path:?}");
+    println!("  name                 {:?}", h.name);
+    println!("  file version         {}", w.container.version);
+    println!("  size                 {}x{} ({} tiles)", h.max_tiles_x, h.max_tiles_y,
+             h.max_tiles_x as i64 * h.max_tiles_y as i64);
+    println!("  seed                 {:?}", h.seed);
+    println!("  game mode            {}", h.game_mode);
+    println!("  spawn                ({}, {})", h.spawn_tile_x, h.spawn_tile_y);
+    println!("  surface / rock       {} / {}", h.world_surface, h.rock_layer);
+    println!("  tile reads           {}", t.tiles);
+    println!("  active tiles         {}", t.active);
+    println!("  walls                {}", t.walls);
+    println!(
+        "  liquids              water {} lava {} honey {} shimmer {}",
+        t.liquid_water, t.liquid_lava, t.liquid_honey, t.liquid_shimmer
+    );
+    println!(
+        "  wiring               wires {} actuators {}",
+        t.wires, t.actuators
+    );
+    println!(
+        "  shapes               slopes {} (upper bound) half bricks {}",
+        t.slopes, t.half_bricks
+    );
+    println!("  sections             {} declared", w.sections.len());
+    for s in &w.sections {
+        println!(
+            "    {:>2}  {:26} at {:>10}  {}",
+            s.index,
+            s.name,
+            s.offset,
+            if s.decoded { "read" } else { "NOT READ YET" }
+        );
+    }
+    let missing = w.undecoded();
+    if !missing.is_empty() {
+        println!("  {} of {} sections are not decoded: {}", missing.len(), w.sections.len(),
+                 missing.join(", "));
     }
 }
 

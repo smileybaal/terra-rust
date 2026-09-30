@@ -340,6 +340,133 @@ pub fn read_header(r: &mut &[u8], version: i32) -> Result<WorldHeader, WorldFile
 /// The world sizes the interactive world-select offers (`Main.cs:5473-5483`).
 pub const VALID_WORLD_SIZES: [(i32, i32); 3] = [(4200, 1200), (6400, 1800), (8400, 2400)];
 
+/// One section of the file, named, with whether this port decodes it yet.
+///
+/// The order is `WorldFile.cs:1765` `LoadWorld_Version2`: each entry is a section the
+/// C# loads in turn, and several only exist from a given version. Naming them is what
+/// makes "unimplemented" visible instead of implied: the reader reports every section
+/// the file declares and says which two it actually reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Section {
+    pub index: usize,
+    pub name: &'static str,
+    pub offset: i32,
+    /// Whether `load_world` decodes this section's contents.
+    pub decoded: bool,
+}
+
+/// The section names, in the C#'s load order.
+pub const SECTION_NAMES: [&str; 11] = [
+    "world header",
+    "tiles",
+    "chests",
+    "signs",
+    "NPCs",
+    "tile entities",
+    "weighted pressure plates",
+    "town manager",
+    "bestiary",
+    "creative powers",
+    "footer",
+];
+
+/// Why a whole world could not be loaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadError {
+    /// The container could not be read.
+    Container(WorldFileError),
+    /// The header could not be read.
+    Header(WorldFileError),
+    /// The tile section could not be decoded.
+    Tiles(crate::tiles::TileError),
+    /// A section pointer is negative, out of order, or past the end of the file.
+    BadSectionPointer(usize),
+}
+
+/// A world, as far as this port can read one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadedWorld {
+    pub container: Container,
+    pub header: WorldHeader,
+    pub tile_stats: crate::tiles::TileStats,
+    pub sections: Vec<Section>,
+}
+
+impl LoadedWorld {
+    /// The sections this port does not decode yet, by name.
+    pub fn undecoded(&self) -> Vec<&'static str> {
+        self.sections.iter().filter(|s| !s.decoded).map(|s| s.name).collect()
+    }
+}
+
+/// Read a whole world: container, header, tiles.
+///
+/// The two runtime tables `tiles::decode_tiles` takes are supplied permissively here,
+/// and that is safe for this function's purpose because NEITHER one can move the cursor:
+/// `wall_count` only decides whether a wall id is zeroed, and `save_slopes` only decides
+/// whether a shape in the header byte is recorded. The byte position is unaffected by
+/// both, so the section-pointer checks still hold. What it does mean is that the
+/// reported slope count is an upper bound, which the caller says out loud rather than
+/// hiding.
+pub fn load_world(data: &[u8]) -> Result<LoadedWorld, LoadError> {
+    let (container, used) = read_container(data).map_err(LoadError::Container)?;
+    if container.positions.is_empty() {
+        return Err(LoadError::BadSectionPointer(0));
+    }
+    // The C#'s own check, reproduced: the container must end where the header begins.
+    if used as i32 != container.positions[0] {
+        return Err(LoadError::BadSectionPointer(0));
+    }
+    let header_start = container.positions[0] as usize;
+    if header_start >= data.len() {
+        return Err(LoadError::BadSectionPointer(0));
+    }
+    let mut r = &data[header_start..];
+    let header = read_header(&mut r, container.version).map_err(LoadError::Header)?;
+
+    // The tile section is the span from positions[1] to positions[2]; the C# refuses to
+    // continue unless the decode ends exactly on the latter.
+    let tile_stats = if container.positions.len() >= 3 {
+        let start = container.positions[1];
+        let end = container.positions[2];
+        if start < 0 || end < start || end as usize > data.len() {
+            return Err(LoadError::BadSectionPointer(1));
+        }
+        let section = &data[start as usize..end as usize];
+        let save_slopes = vec![true; 0x10000];
+        let (stats, consumed) = crate::tiles::decode_tiles(
+            section,
+            header.max_tiles_x,
+            header.max_tiles_y,
+            &container.importance,
+            &save_slopes,
+            u16::MAX,
+        )
+        .map_err(LoadError::Tiles)?;
+        if consumed != (end - start) as usize {
+            return Err(LoadError::BadSectionPointer(2));
+        }
+        stats
+    } else {
+        crate::tiles::TileStats::default()
+    };
+
+    let sections = container
+        .positions
+        .iter()
+        .enumerate()
+        .map(|(i, offset)| Section {
+            index: i,
+            name: SECTION_NAMES.get(i).copied().unwrap_or("unknown section"),
+            offset: *offset,
+            // Only the first two are read. The rest are NAMED so the gap is visible.
+            decoded: i <= 1,
+        })
+        .collect();
+
+    Ok(LoadedWorld { container, header, tile_stats, sections })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,6 +626,63 @@ mod tests {
             h.rock_layer
         );
         h
+    }
+
+    /// `load_world` ties the three pieces together, and names what it did NOT read.
+    ///
+    /// The undecoded list is the part that matters: a loader that reported only its own
+    /// successes would be indistinguishable from one that reads everything.
+    #[test]
+    fn load_world_reports_what_it_did_not_read() {
+        let Some(dir) = worlds_dir() else {
+            println!("no Terraria Worlds directory; the load_world check did not run");
+            return;
+        };
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+            .expect("the Worlds directory is readable")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "wld"))
+            .collect();
+        files.sort();
+        let Some(path) = files.first() else {
+            println!("no .wld in {}; the load_world check did not run", dir.display());
+            return;
+        };
+
+        let data = fs::read(path).expect("the world file is readable");
+        let w = load_world(&data).expect("the world loads");
+        assert!(!w.header.name.is_empty());
+        assert!(w.tile_stats.active > 0);
+        // Eleven sections in a 1.4.4 file, and the first two are the ones read.
+        assert!(w.sections.len() >= 3, "only {} sections", w.sections.len());
+        assert_eq!(w.sections[0].name, "world header");
+        assert_eq!(w.sections[1].name, "tiles");
+        assert!(w.sections[0].decoded && w.sections[1].decoded);
+        assert!(
+            w.sections[2..].iter().all(|s| !s.decoded),
+            "only the header and the tiles are read"
+        );
+        assert!(w.undecoded().contains(&"chests"));
+        // Every section pointer is inside the file and in order.
+        for pair in w.sections.windows(2) {
+            assert!(pair[0].offset <= pair[1].offset, "{:?} then {:?}", pair[0], pair[1]);
+        }
+        let last = w.sections.last().unwrap();
+        assert!(last.offset >= 0 && (last.offset as usize) < data.len());
+    }
+
+    /// A file whose section pointers disagree with its own contents is refused rather
+    /// than decoded optimistically.
+    #[test]
+    fn load_world_refuses_a_broken_section_pointer() {
+        // A container whose positions[0] does not match where the container ended.
+        let mut data = synthetic(KNOWN_VERSION, &[999, 1000, 1001], &[false]);
+        data.extend_from_slice(&[0u8; 64]);
+        assert_eq!(load_world(&data), Err(LoadError::BadSectionPointer(0)));
+
+        // A container that ends correctly but declares an empty section table.
+        let data = synthetic(KNOWN_VERSION, &[], &[]);
+        assert_eq!(load_world(&data), Err(LoadError::BadSectionPointer(0)));
     }
 
     /// A REAL world file, end to end: the container must land exactly on `positions[0]`,
